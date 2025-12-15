@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout git repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Fetch Tags
+      run: git fetch --tags origin
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: 25
+        cache: 'maven'
+        cache-dependency-path: 'deps.edn'
+
+    - uses: extractions/setup-just@v2
+    - uses: DeLaGuardo/setup-clojure@13.4
+      with:
+        cli: latest
+
+    - name: Build
+      run: just build :version '\"${{ github.ref_name }}\"'
+
+    - name: Release
+      env:
+        CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+        CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
+      if: ${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
+      run: just release

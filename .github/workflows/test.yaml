@@ -1,0 +1,28 @@
+name: Test
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout git repo
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: 'maven'
+          cache-dependency-path: 'deps.edn'
+
+      - uses: extractions/setup-just@v2
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+          clj-kondo: latest
+
+      - name: Test
+        run: |
+          just test

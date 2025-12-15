@@ -1,0 +1,13 @@
+{:paths ["src" "resources"]
+
+ :deps {metosin/malli {:mvn/version "0.20.0"}}
+
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
+                               nubank/matcher-combinators {:mvn/version "3.9.2"}}
+                  :main-opts ["-m" "kaocha.runner" "-c" "tests.edn"]}
+
+           :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.11"}
+                          com.kepler16/kaven {:mvn/version "1.0.0-alpha.1"}}
+                   :ns-default build
+                   :extra-paths ["build"]}}}

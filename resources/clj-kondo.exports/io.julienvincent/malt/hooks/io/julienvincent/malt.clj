@@ -1,0 +1,103 @@
+(ns hooks.io.julienvincent.malt
+  (:refer-clojure :exclude [defprotocol])
+  (:require
+   [clj-kondo.hooks-api :as api]))
+
+(def ^:private schema-meta-keys
+  {:inputs :io.julienvincent.malt/input-schemas
+   :output :io.julienvincent.malt/output-schema})
+
+(defn- vector-node? [node]
+  (= :vector (:tag node)))
+
+(defn- normalize-method [method-node]
+  (let [[method-name & rest-children] (:children method-node)
+        [doc-node rest-children] (if (and (seq rest-children)
+                                          (string? (api/sexpr (first rest-children))))
+                                   [(first rest-children) (rest rest-children)]
+                                   [nil rest-children])
+        [attr-node rest-children] (if (and (seq rest-children)
+                                           (map? (api/sexpr (first rest-children))))
+                                    [(first rest-children) (rest rest-children)]
+                                    [nil rest-children])
+        schema-form? (and (= 2 (count rest-children))
+                          (= 1 (count (filter vector-node? rest-children))))
+        method-children (if schema-form?
+                          (let [[input-schemas-node output-schema-node] rest-children
+                                input-sexpr (api/sexpr input-schemas-node)
+                                output-sexpr (api/sexpr output-schema-node)
+                                arity (count (:children input-schemas-node))
+                                method-meta (cond-> (merge (meta (api/sexpr method-name))
+                                                           {(schema-meta-keys :inputs) input-sexpr
+                                                            (schema-meta-keys :output) output-sexpr})
+                                              doc-node (assoc :doc (api/sexpr doc-node))
+                                              attr-node (merge (api/sexpr attr-node)))
+                                method-name (with-meta method-name method-meta)
+                                arg-vector (api/vector-node (into [(api/token-node 'this)]
+                                                                  (map (fn [idx]
+                                                                         (api/token-node
+                                                                          (symbol (str "arg" idx))))
+                                                                       (range 1 (inc arity)))))
+                                doc+attr (cond-> []
+                                           doc-node (conj doc-node)
+                                           attr-node (conj attr-node))]
+                            (into [method-name arg-vector] doc+attr))
+                          (:children method-node))]
+    (api/list-node method-children)))
+
+(defn defprotocol [{:keys [node]}]
+  (let [[_ name-node & rest-children] (:children node)
+        [doc-node rest-children] (if (and (seq rest-children)
+                                          (string?
+                                           (api/sexpr (first rest-children))))
+                                   [(first rest-children)
+                                    (rest rest-children)]
+                                   [nil rest-children])
+        [attr-node rest-children] (if (and (seq rest-children)
+                                           (map?
+                                            (api/sexpr (first rest-children))))
+                                    [(first rest-children)
+                                     (rest rest-children)]
+                                    [nil rest-children])
+        name-meta (cond-> (or (meta (api/sexpr name-node)) {})
+                    doc-node (assoc :doc (api/sexpr doc-node))
+                    attr-node (merge (api/sexpr attr-node)))
+        name-node (with-meta name-node name-meta)
+        method-schema-nodes (->> rest-children
+                                 (mapcat (fn [method-node]
+                                           (let [[_method-name & method-rest] (:children method-node)
+                                                 [_doc method-rest] (if (and (seq method-rest)
+                                                                             (string? (api/sexpr (first method-rest))))
+                                                                      [(first method-rest) (rest method-rest)]
+                                                                      [nil method-rest])
+                                                 [_attr method-rest] (if (and (seq method-rest)
+                                                                              (map? (api/sexpr (first method-rest))))
+                                                                       [(first method-rest) (rest method-rest)]
+                                                                       [nil method-rest])]
+                                             (when (= 2 (count method-rest))
+                                               (let [[input-schemas-node output-schema-node] method-rest]
+                                                 (when (vector-node? input-schemas-node)
+                                                   (concat (:children input-schemas-node) [output-schema-node])))))))
+                                 (remove nil?))
+        methods (mapv normalize-method rest-children)
+        defprotocol-node (api/list-node (list* (api/token-node 'defprotocol)
+                                               name-node
+                                               methods))
+        new-node (if (seq method-schema-nodes)
+                   (let [bindings (->> method-schema-nodes
+                                       (mapcat (fn [schema-node]
+                                                 [(api/token-node '_) schema-node]))
+                                       (vec))]
+                     (api/list-node [(api/token-node 'let)
+                                     (api/vector-node bindings)
+                                     defprotocol-node]))
+                   defprotocol-node)]
+    {:node new-node}))
+
+(defn extend [{:keys [node]}]
+  (let [[_ & rest-children] (:children node)]
+    {:node (api/list-node (cons (api/token-node 'extend-type) rest-children))}))
+
+(defn implement [{:keys [node]}]
+  (let [[_ & rest-children] (:children node)]
+    {:node (api/list-node (cons (api/token-node 'reify) rest-children))}))
