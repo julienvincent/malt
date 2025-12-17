@@ -3,10 +3,6 @@
   (:require
    [clj-kondo.hooks-api :as api]))
 
-(def ^:private schema-meta-keys
-  {:inputs :io.julienvincent.malt/input-schemas
-   :output :io.julienvincent.malt/output-schema})
-
 (defn- vector-node? [node]
   (= :vector (:tag node)))
 
@@ -36,14 +32,24 @@
         method-children (if schema-form?
                           (let [[input-schemas-node output-schema-node] rest-children
                                 {:keys [pair-form? param-nodes schema-nodes]} (parse-input-schemas-node
-                                                                              input-schemas-node)]
+                                                                               input-schemas-node)]
                             (if pair-form?
-                              (let [input-sexpr (mapv api/sexpr schema-nodes)
+                              (let [params-sexpr (mapv api/sexpr param-nodes)
+                                    input-sexpr (mapv api/sexpr schema-nodes)
+                                    schema-map-sexpr (zipmap (mapv (fn [sym]
+                                                                     (keyword (name sym)))
+                                                                   params-sexpr)
+                                                             input-sexpr)
+                                    args-schema-sexpr (when (seq input-sexpr)
+                                                        (into [:cat] input-sexpr))
                                     output-sexpr (api/sexpr output-schema-node)
                                     arity (count schema-nodes)
                                     method-meta (cond-> (merge (meta (api/sexpr method-name))
-                                                               {(schema-meta-keys :inputs) input-sexpr
-                                                                (schema-meta-keys :output) output-sexpr})
+                                                               (cond-> {:malt/params params-sexpr
+                                                                        :malt/arguments-schema args-schema-sexpr
+                                                                        :malt/return-schema output-sexpr}
+                                                                 (seq params-sexpr)
+                                                                 (assoc :malt/param-schemas schema-map-sexpr)))
                                                   doc-node (assoc :doc (api/sexpr doc-node))
                                                   attr-node (merge (api/sexpr attr-node)))
                                     method-name (with-meta method-name method-meta)
@@ -121,6 +127,16 @@
 
 (defn defrecord [{:keys [node]}]
   (let [[_ name-node & rest-children] (:children node)
+        name-sym (api/sexpr name-node)
+        record-name (name name-sym)
+        schema-var-sym (symbol (str "?" record-name "Schema"))
+        instance-var-sym (symbol (str "?" record-name))
+        schema-def-node (api/list-node [(api/token-node 'def)
+                                        (api/token-node schema-var-sym)
+                                        (api/token-node nil)])
+        instance-def-node (api/list-node [(api/token-node 'def)
+                                          (api/token-node instance-var-sym)
+                                          (api/token-node nil)])
         [doc-node rest-children] (if (and (seq rest-children)
                                           (string? (api/sexpr (first rest-children))))
                                    [(first rest-children)
@@ -155,4 +171,7 @@
                                      (api/vector-node bindings)
                                      defrecord-node]))
                    defrecord-node)]
-    {:node new-node}))
+    {:node (api/list-node [(api/token-node 'do)
+                           schema-def-node
+                           instance-def-node
+                           new-node])}))

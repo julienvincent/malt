@@ -6,24 +6,37 @@
 
 (defn validate!
   [schema value ex-data]
-  (when-not (m/validate schema value)
-    (let [explain (m/explain schema value)
-          phase (:phase ex-data)
-          failure-type (or (:type ex-data)
-                           (case phase
-                             :input :malt/input-validation-failed
-                             :output :malt/output-validation-failed
-                             nil))
-          data (-> ex-data
-                   (dissoc :phase :type :index :schema :value :explain :errors :output :input)
-                   (assoc :type failure-type
-                          :errors (me/humanize explain))
-                   (cond-> (= :output phase)
-                     (assoc :output value))
-                   (cond-> (= :input phase)
-                     (assoc :input (:input ex-data))))]
-      (throw (ex-info "Malli validation failed"
-                      data)))))
+  (let [validator (:validator ex-data)
+        msg (:message ex-data)]
+    (when-not (fn? validator)
+      (throw (IllegalStateException.
+              (str "validate! requires a :validator fn; got "
+                   (pr-str validator)
+                   " with ex-data "
+                   (pr-str (dissoc ex-data :validator))))))
+    (when-not (string? msg)
+      (throw (IllegalStateException.
+              (str "validate! requires a :message string; got "
+                   (pr-str msg)
+                   " with ex-data "
+                   (pr-str (dissoc ex-data :message))))))
+    (when-not (validator value)
+      (let [explain (m/explain schema value)
+            phase (:phase ex-data)
+            failure-type (or (:type ex-data)
+                             (case phase
+                               :input :malt/input-validation-failed
+                               :output :malt/output-validation-failed
+                               nil))
+            data (-> ex-data
+                     (dissoc :phase :type :index :schema :value :explain :errors :output :input :message :validator)
+                     (assoc :type failure-type
+                            :errors (me/humanize explain))
+                     (cond-> (= :output phase)
+                       (assoc :output value))
+                     (cond-> (= :input phase)
+                       (assoc :input (:input ex-data))))]
+        (throw (ex-info msg data))))))
 
 (defmacro defprotocol
   [name & specs]
@@ -82,16 +95,53 @@
                                               name "/" method-name "; got "
                                               (pr-str input-schemas)))))
                                (let [{:keys [params schemas]} (parse-input-specs name method-name input-schemas)
-                                     schema-meta {::input-schemas (vec schemas)
-                                                  ::output-schema output-schema}
+                                     schema-map (zipmap (mapv (comp keyword clojure.core/name) params) schemas)
+                                     schema-meta (cond-> {:malt/params (vec params)
+                                                          :malt/arguments-schema (when (seq params)
+                                                                                   (into [:cat] schemas))
+                                                          :malt/return-schema output-schema}
+                                                   (seq params)
+                                                   (assoc :malt/param-schemas schema-map))
                                      method-meta (cond-> (merge (meta method-name) schema-meta)
                                                    method-doc (assoc :doc method-doc)
                                                    method-attr (merge method-attr))
                                      method-name (with-meta method-name method-meta)
-                                     arglist (into ['this] params)]
-                                 (list method-name arglist)))))]
-    `(clojure.core/defprotocol ~name-sym
-       ~@(mapv normalize-method specs))))
+                                     arglist (into ['this] params)
+                                     doc+attr (cond-> []
+                                                method-doc (conj method-doc)
+                                                method-attr (conj method-attr))]
+                                 (list* method-name arglist doc+attr)))))]
+    `(do
+       (clojure.core/defprotocol ~name-sym
+         ~@(mapv normalize-method specs))
+       (let [protocol-var# (var ~name-sym)
+             protocol-ns# (:ns (meta protocol-var#))
+             resolve-schema# (fn [schema-spec#]
+                               (resolve-schema-spec protocol-ns# schema-spec#))]
+         (alter-var-root
+          protocol-var#
+          (fn [proto#]
+            (update proto#
+                    :sigs
+                    (fn [sigs#]
+                      (into {}
+                            (map (fn [[method-kw# sig#]]
+                                   (let [args-schema-spec# (:malt/arguments-schema sig#)
+                                         return-schema-spec# (:malt/return-schema sig#)
+                                         sig# (cond-> sig#
+                                                (seq args-schema-spec#)
+                                                (assoc :malt/arguments-validator
+                                                       (m/validator
+                                                        (into [:cat]
+                                                              (mapv resolve-schema#
+                                                                    (rest args-schema-spec#)))))
+
+                                                return-schema-spec#
+                                                (assoc :malt/return-validator
+                                                       (m/validator (resolve-schema# return-schema-spec#))))]
+                                     [method-kw# sig#]))
+                                 sigs#)))))))
+       (var ~name-sym))))
 
 (defn ^:no-doc resolve-schema-spec
   [schema-ns schema-spec]
@@ -116,20 +166,23 @@
     (let [sigs (:sigs @protocol-var)
           method-kw (keyword (name method-sym))
           method-sig (get sigs method-kw)
-          input-schema-specs (or (::input-schemas method-sig)
-                                 (some-> (::input-schema method-sig) vector))
-          output-schema-spec (::output-schema method-sig)
+          args-schema-spec (:malt/arguments-schema method-sig)
+          args-validator (:malt/arguments-validator method-sig)
+          return-schema-spec (:malt/return-schema method-sig)
+          return-validator (:malt/return-validator method-sig)
+          input-param-syms (vec (:malt/params method-sig))
           protocol-ns (:ns (meta protocol-var))
           resolve-schema (fn [schema-spec]
                            (resolve-schema-spec protocol-ns schema-spec))]
-      (when-not (vector? input-schema-specs)
+      (when (nil? return-schema-spec)
         (throw (IllegalArgumentException.
-                (str "Missing input schema specs for " protocol-sym "/" method-kw))))
-      (when (nil? output-schema-spec)
-        (throw (IllegalArgumentException.
-                (str "Missing output schema spec for " protocol-sym "/" method-kw))))
-      [(mapv resolve-schema input-schema-specs)
-       (resolve-schema output-schema-spec)])))
+                (str "Missing return schema spec for " protocol-sym "/" method-kw))))
+      [(when (seq args-schema-spec)
+         (into [:cat] (mapv resolve-schema (rest args-schema-spec))))
+       args-validator
+       (resolve-schema return-schema-spec)
+       return-validator
+       input-param-syms])))
 
 (defmacro defrecord
   {:style/indent :defn}
@@ -159,6 +212,8 @@
               name-sym (with-meta name name-meta)
               ctor-sym (symbol (str "->" name))
               map-ctor-sym (symbol (str "map->" name))
+              schema-sym (symbol (str "?" name "Schema"))
+              instance-schema-sym (symbol (str "?" name))
               record-ns-sym (ns-name *ns*)
               qualified-record-sym (symbol (str record-ns-sym) (str name))
               field-ks (mapv (comp keyword clojure.core/name) params)]
@@ -167,59 +222,114 @@
              (let [orig-ctor# ~ctor-sym
                    orig-map-ctor# ~map-ctor-sym
                    schema-ns# (the-ns '~record-ns-sym)
-                   schema-specs# '~schema-specs
-                   field-ks# '~field-ks
+                   field-schemas# (mapv (fn [schema-spec#]
+                                          (resolve-schema-spec schema-ns# schema-spec#))
+                                        '~schema-specs)
+                   args-schema# (into [:cat] field-schemas#)
+                   args-validator# (m/validator args-schema#)
+                   map-schema# (into [:map {:closed true}]
+                                     (mapv (fn [field-k# field-schema#]
+                                             [field-k# field-schema#])
+                                           '~field-ks
+                                           field-schemas#))
+                   map-validator# (m/validator map-schema#)
                    ex-data-base# {:record (quote ~qualified-record-sym)}]
+               (def ~schema-sym map-schema#)
+               (def ~instance-schema-sym
+                 [:fn
+                  {:error/message ~(str "should be an instance of " qualified-record-sym)}
+                  (fn [value#]
+                    (instance? ~name-sym value#))])
                (defn ~ctor-sym
                  ~(into [] params)
-                 (let [field-schemas# (mapv (fn [schema-spec#]
-                                              (resolve-schema-spec schema-ns# schema-spec#))
-                                            schema-specs#)]
-                   (validate-inputs! field-schemas#
-                                     [~@params]
-                                     (assoc ex-data-base#
-                                            :constructor (quote ~ctor-sym)
-                                            :type :malt/record-validation-failed))
-                    (orig-ctor# ~@params)))
+                 (validate-inputs! args-schema#
+                                   args-validator#
+                                   '~params
+                                   [~@params]
+                                   (assoc ex-data-base#
+                                          :constructor (quote ~ctor-sym)
+                                          :type :malt/record-validation-failed))
+                 (orig-ctor# ~@params))
                (defn ~map-ctor-sym
                  [m#]
-                 (let [field-schemas# (mapv (fn [schema-spec#]
-                                              (resolve-schema-spec schema-ns# schema-spec#))
-                                            schema-specs#)]
-                   (validate! (into [:map]
-                                    (mapv (fn [field-k# field-schema#]
-                                            [field-k# field-schema#])
-                                          field-ks#
-                                          field-schemas#))
-                              m#
-                              (assoc ex-data-base#
-                                     :constructor (quote ~map-ctor-sym)
-                                     :phase :input
-                                     :type :malt/record-validation-failed
-                                     :input m#))
-                   (orig-map-ctor# m#))))))))))
+                 (validate! map-schema#
+                            m#
+                            (assoc ex-data-base#
+                                   :constructor (quote ~map-ctor-sym)
+                                   :phase :input
+                                   :type :malt/record-validation-failed
+                                   :input m#
+                                   :validator map-validator#
+                                   :message ~(str "Invalid parameter passed to constructor '"
+                                                  (clojure.core/name map-ctor-sym)
+                                                  "' of "
+                                                  qualified-record-sym)))
+                 (orig-map-ctor# m#)))))))))
 
 (defn validate-inputs!
-  [input-schemas params ex-data]
-  (when-not (= (count input-schemas) (count params))
-    (throw (ex-info "Malli validation failed"
-                    (assoc ex-data
-                           :phase :input
-                           :type :malt/arity-mismatch
-                           :expected (count input-schemas)
-                           :actual (count params)
-                           :input (mapv (constantly '_) params)
-                           :value params))))
-  (doseq [[schema value idx] (map vector input-schemas params (range))]
-    (validate! schema
-               value
-               (assoc ex-data
-                      :phase :input
-                      :type (or (:type ex-data) :malt/input-validation-failed)
-                      :input (mapv (fn [current-idx current-value]
-                                     (if (= current-idx idx) current-value '_))
-                                   (range)
-                                   params)))))
+  [args-schema args-validator input-param-syms params ex-data]
+  (let [protocol-sym (:protocol ex-data)
+        method-sym (:method ex-data)
+        record-sym (:record ex-data)
+        ctor-sym (:constructor ex-data)
+        base-msg (cond
+                   (and protocol-sym method-sym) (str "Invalid arguments passed to '"
+                                                      (name method-sym)
+                                                      "' of "
+                                                      protocol-sym)
+                   (and record-sym ctor-sym) (str "Invalid parameter passed to constructor '"
+                                                  (name ctor-sym)
+                                                  "' of "
+                                                  record-sym)
+                   :else (throw (IllegalStateException.
+                                 (str "validate-inputs! requires either :protocol/:method or "
+                                      ":record/:constructor; got "
+                                      (pr-str (select-keys ex-data
+                                                           [:protocol :method :record :constructor]))))))]
+    (when-not (fn? args-validator)
+      (throw (IllegalStateException.
+              (str "validate-inputs! requires an args-validator fn; got "
+                   (pr-str args-validator)))))
+    (when-not (= (count input-param-syms) (count params))
+      (throw (ex-info base-msg
+                      (assoc (dissoc ex-data :phase)
+                             :type :malt/arity-mismatch
+                             :expected (count input-param-syms)
+                             :actual (count params)
+                             :input (mapv (constantly '_) params)
+                             :value params))))
+    (when-not (args-validator params)
+      (let [explain (m/explain args-schema params)
+            errors-by-idx (me/humanize explain)
+            failing-idx (or (->> errors-by-idx
+                                 (map-indexed vector)
+                                 (filter (fn [[_idx idx-errors]]
+                                           (some? idx-errors)))
+                                 (ffirst))
+                            0)
+            param-name (some-> (nth input-param-syms failing-idx nil) name)
+            msg (cond
+                  (and protocol-sym method-sym param-name) (str "Invalid parameter '"
+                                                                param-name
+                                                                "' passed to '"
+                                                                (name method-sym)
+                                                                "' of "
+                                                                protocol-sym)
+                  (and record-sym ctor-sym param-name) (str "Invalid parameter '"
+                                                            param-name
+                                                            "' passed to constructor '"
+                                                            (name ctor-sym)
+                                                            "' of "
+                                                            record-sym)
+                  :else base-msg)
+            data (assoc (dissoc ex-data :phase)
+                        :type (or (:type ex-data) :malt/input-validation-failed)
+                        :errors errors-by-idx
+                        :input (mapv (fn [current-idx current-value]
+                                       (if (= current-idx failing-idx) current-value '_))
+                                     (range)
+                                     params))]
+        (throw (ex-info msg data))))))
 
 (defn- parse-implementations
   [forms]
@@ -269,33 +379,51 @@
                                       (remove (fn [[binding _sym]] (symbol? binding)))
                                       (mapcat identity)
                                       (vec))
-            input-schema-sym (gensym "input-schema-")
-            output-schema-sym (gensym "output-schema-")
+            args-schema-sym (gensym "args-schema-")
+            args-validator-sym (gensym "args-validator-")
+            return-schema-sym (gensym "return-schema-")
+            return-validator-sym (gensym "return-validator-")
+            input-param-syms-sym (gensym "input-param-syms-")
             ex-data-base-sym (gensym "ex-data-base-")
             result-sym (gensym "result-")
             ex-data-base {:protocol (list 'quote qualified-protocol-sym)
                           :method (list 'quote method-sym)}]
         (list method-sym
               (into [this-binding] params-syms)
-              `(let [[~input-schema-sym ~output-schema-sym]
+              `(let [[~args-schema-sym ~args-validator-sym ~return-schema-sym ~return-validator-sym ~input-param-syms-sym]
                      (schema-vars-for-method '~qualified-protocol-sym '~method-sym)
                      ~ex-data-base-sym ~ex-data-base]
-                 (validate-inputs! ~input-schema-sym [~@params-syms] ~ex-data-base-sym)
+                 (when ~args-validator-sym
+                   (validate-inputs! ~args-schema-sym
+                                     ~args-validator-sym
+                                     ~input-param-syms-sym
+                                     [~@params-syms]
+                                     ~ex-data-base-sym))
                  ~(if (seq destructure-bindings)
                     `(let [~@destructure-bindings]
                        (let [~result-sym (do ~@body)]
-                         (validate! ~output-schema-sym
+                         (validate! ~return-schema-sym
                                     ~result-sym
                                     (assoc ~ex-data-base-sym
                                            :phase :output
-                                           :type :malt/output-validation-failed))
+                                           :type :malt/output-validation-failed
+                                           :validator ~return-validator-sym
+                                           :message ~(str "Invalid return value from '"
+                                                          (name method-sym)
+                                                          "' of "
+                                                          qualified-protocol-sym)))
                          ~result-sym))
                     `(let [~result-sym (do ~@body)]
-                       (validate! ~output-schema-sym
+                       (validate! ~return-schema-sym
                                   ~result-sym
                                   (assoc ~ex-data-base-sym
                                          :phase :output
-                                         :type :malt/output-validation-failed))
+                                         :type :malt/output-validation-failed
+                                         :validator ~return-validator-sym
+                                         :message ~(str "Invalid return value from '"
+                                                        (name method-sym)
+                                                        "' of "
+                                                        qualified-protocol-sym)))
                        ~result-sym))))))))
 
 (defmacro extend

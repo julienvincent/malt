@@ -115,6 +115,11 @@ editor/clojure-lsp.
 
 ;; Success!
 (map->DataSource {:db (jdbc/get-datasource {:uri "postgres://..."})})
+
+;; Some top-level malli schemas are also exported as vars which can be used to validate
+;; record types.
+(m/validate ?Service (->Service db))
+(m/validate ?ServiceSchema {:db db})
 ```
 
 See [the test](test/io/julienvincent/malt_test.clj) for some more examples of how it works

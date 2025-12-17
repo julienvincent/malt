@@ -1,6 +1,7 @@
 (ns io.julienvincent.kondo-test
   (:require
-   [io.julienvincent.malt :as malt]))
+   [io.julienvincent.malt :as malt]
+   [malli.core :as m]))
 
 (def ?SchemaReference :int)
 
@@ -61,3 +62,7 @@
 (b "" "asd")
 (a 1 1 1)
 (c "asd" "asd" "asd")
+
+(m/validate ?Point (->Point 1 1))
+(m/validate ?PointSchema {:x 1
+                          :y 1})
