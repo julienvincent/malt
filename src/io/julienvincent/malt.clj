@@ -1,5 +1,5 @@
 (ns io.julienvincent.malt
-  (:refer-clojure :exclude [defprotocol extend])
+  (:refer-clojure :exclude [defprotocol extend defrecord])
   (:require
    [malli.core :as m]
    [malli.error :as me]))
@@ -93,6 +93,20 @@
     `(clojure.core/defprotocol ~name-sym
        ~@(mapv normalize-method specs))))
 
+(defn ^:no-doc resolve-schema-spec
+  [schema-ns schema-spec]
+  (cond
+    (nil? schema-spec) (throw (IllegalArgumentException.
+                               "Schema must not be nil"))
+    (var? schema-spec) (deref schema-spec)
+    (symbol? schema-spec) (let [schema-var (ns-resolve schema-ns schema-spec)]
+                            (when-not (var? schema-var)
+                              (throw (IllegalArgumentException.
+                                      (str "Schema symbol must resolve to a var; got "
+                                           (pr-str schema-spec)))))
+                            (deref schema-var))
+    :else schema-spec))
+
 (defn schema-vars-for-method
   [protocol-sym method-sym]
   (let [protocol-var (resolve protocol-sym)]
@@ -107,17 +121,7 @@
           output-schema-spec (::output-schema method-sig)
           protocol-ns (:ns (meta protocol-var))
           resolve-schema (fn [schema-spec]
-                           (cond
-                             (nil? schema-spec) (throw (IllegalArgumentException.
-                                                        "Schema must not be nil"))
-                             (var? schema-spec) (deref schema-spec)
-                             (symbol? schema-spec) (let [schema-var (ns-resolve protocol-ns schema-spec)]
-                                                     (when-not (var? schema-var)
-                                                       (throw (IllegalArgumentException.
-                                                               (str "Schema symbol must resolve to a var; got "
-                                                                    (pr-str schema-spec)))))
-                                                     (deref schema-var))
-                             :else schema-spec))]
+                           (resolve-schema-spec protocol-ns schema-spec))]
       (when-not (vector? input-schema-specs)
         (throw (IllegalArgumentException.
                 (str "Missing input schema specs for " protocol-sym "/" method-kw))))
@@ -126,6 +130,74 @@
                 (str "Missing output schema spec for " protocol-sym "/" method-kw))))
       [(mapv resolve-schema input-schema-specs)
        (resolve-schema output-schema-spec)])))
+
+(defmacro defrecord
+  {:style/indent :defn}
+  [name & specs]
+  (let [[doc-string specs] (if (string? (first specs))
+                             [(first specs) (rest specs)]
+                             [nil specs])
+        [attr-map specs] (if (map? (first specs))
+                           [(first specs) (rest specs)]
+                           [nil specs])
+        [fields & impls] specs]
+    (when-not (vector? fields)
+      (throw (IllegalArgumentException.
+              (str "Fields must be a vector for " name "; got " (pr-str fields)))))
+    (let [elems (vec fields)]
+      (when (odd? (count elems))
+        (throw (IllegalArgumentException.
+                (str "Fields must be param/schema pairs for " name "; got " (pr-str fields)))))
+      (let [params (vec (take-nth 2 elems))
+            schema-specs (vec (take-nth 2 (rest elems)))]
+        (when-not (every? symbol? params)
+          (throw (IllegalArgumentException.
+                  (str "Field names must be symbols for " name "; got " (pr-str fields)))))
+        (let [name-meta (merge (meta name)
+                               attr-map
+                               (when doc-string {:doc doc-string}))
+              name-sym (with-meta name name-meta)
+              ctor-sym (symbol (str "->" name))
+              map-ctor-sym (symbol (str "map->" name))
+              record-ns-sym (ns-name *ns*)
+              qualified-record-sym (symbol (str record-ns-sym) (str name))
+              field-ks (mapv (comp keyword clojure.core/name) params)]
+          `(do
+             (clojure.core/defrecord ~name-sym [~@params] ~@impls)
+             (let [orig-ctor# ~ctor-sym
+                   orig-map-ctor# ~map-ctor-sym
+                   schema-ns# (the-ns '~record-ns-sym)
+                   schema-specs# '~schema-specs
+                   field-ks# '~field-ks
+                   ex-data-base# {:record (quote ~qualified-record-sym)}]
+               (defn ~ctor-sym
+                 ~(into [] params)
+                 (let [field-schemas# (mapv (fn [schema-spec#]
+                                              (resolve-schema-spec schema-ns# schema-spec#))
+                                            schema-specs#)]
+                   (validate-inputs! field-schemas#
+                                     [~@params]
+                                     (assoc ex-data-base#
+                                            :constructor (quote ~ctor-sym)
+                                            :type :malt/record-validation-failed))
+                    (orig-ctor# ~@params)))
+               (defn ~map-ctor-sym
+                 [m#]
+                 (let [field-schemas# (mapv (fn [schema-spec#]
+                                              (resolve-schema-spec schema-ns# schema-spec#))
+                                            schema-specs#)]
+                   (validate! (into [:map]
+                                    (mapv (fn [field-k# field-schema#]
+                                            [field-k# field-schema#])
+                                          field-ks#
+                                          field-schemas#))
+                              m#
+                              (assoc ex-data-base#
+                                     :constructor (quote ~map-ctor-sym)
+                                     :phase :input
+                                     :type :malt/record-validation-failed
+                                     :input m#))
+                   (orig-map-ctor# m#))))))))))
 
 (defn validate-inputs!
   [input-schemas params ex-data]
@@ -143,7 +215,7 @@
                value
                (assoc ex-data
                       :phase :input
-                      :type :malt/input-validation-failed
+                      :type (or (:type ex-data) :malt/input-validation-failed)
                       :input (mapv (fn [current-idx current-value]
                                      (if (= current-idx idx) current-value '_))
                                    (range)

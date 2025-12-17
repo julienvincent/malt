@@ -118,3 +118,41 @@
 (defn implement [{:keys [node]}]
   (let [[_ & rest-children] (:children node)]
     {:node (api/list-node (cons (api/token-node 'reify) rest-children))}))
+
+(defn defrecord [{:keys [node]}]
+  (let [[_ name-node & rest-children] (:children node)
+        [doc-node rest-children] (if (and (seq rest-children)
+                                          (string? (api/sexpr (first rest-children))))
+                                   [(first rest-children)
+                                    (rest rest-children)]
+                                   [nil rest-children])
+        [attr-node rest-children] (if (and (seq rest-children)
+                                           (map? (api/sexpr (first rest-children))))
+                                    [(first rest-children)
+                                     (rest rest-children)]
+                                    [nil rest-children])
+        [fields-node & impls] rest-children
+        field-children (when (vector-node? fields-node) (:children fields-node))
+        pair-form? (and (vector-node? fields-node)
+                        (even? (count field-children)))
+        params (when pair-form? (vec (take-nth 2 field-children)))
+        schemas (when pair-form? (vec (take-nth 2 (rest field-children))))
+        fields-node (if pair-form?
+                      (api/vector-node params)
+                      fields-node)
+        defrecord-node (api/list-node (concat (cond-> [(api/token-node 'defrecord)
+                                                       name-node]
+                                                doc-node (conj doc-node)
+                                                attr-node (conj attr-node))
+                                              [fields-node]
+                                              impls))
+        new-node (if pair-form?
+                   (let [bindings (->> schemas
+                                       (mapcat (fn [schema-node]
+                                                 [(api/token-node '_) schema-node]))
+                                       (vec))]
+                     (api/list-node [(api/token-node 'let)
+                                     (api/vector-node bindings)
+                                     defrecord-node]))
+                   defrecord-node)]
+    {:node new-node}))

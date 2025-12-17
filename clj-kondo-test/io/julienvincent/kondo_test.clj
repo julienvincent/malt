@@ -4,6 +4,15 @@
 
 (def ?SchemaReference :int)
 
+(malt/defrecord Point
+  [x :int
+   y ?SchemaReference])
+
+(map->Point {:x 1 :y 1})
+(map->Point {:x "asd" :y 1})
+(->Point 1 1)
+(->Point "1" "1")
+
 (malt/defprotocol Example
   (a
     "Some docs about this API"

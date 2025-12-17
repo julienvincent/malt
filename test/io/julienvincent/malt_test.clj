@@ -62,6 +62,35 @@
                         :errors ["should be nil"]}
                        (method-5 impl)))))
 
+(malt/defrecord Person
+  [name :string
+   age :int])
+
+(deftest record-constructors-are-validated
+  (is (= {:name "bob" :age 1}
+         (into {} (->Person "bob" 1))))
+
+  (is (= {:name "bob" :age 1}
+         (into {} (map->Person {:name "bob" :age 1}))))
+
+  (is (thrown-match? clojure.lang.ExceptionInfo
+                     (matchers/equals
+                      {:type :malt/record-validation-failed
+                       :record 'io.julienvincent.malt-test/Person
+                       :constructor '->Person
+                       :input [1 '_]
+                       :errors ["should be a string"]})
+                     (->Person 1 2)))
+
+  (is (thrown-match? clojure.lang.ExceptionInfo
+                     (matchers/equals
+                      {:type :malt/record-validation-failed
+                       :record 'io.julienvincent.malt-test/Person
+                       :constructor 'map->Person
+                       :input {:name "bob" :age "1"}
+                       :errors {:age ["should be an integer"]}})
+                     (map->Person {:name "bob" :age "1"}))))
+
 (malt/defprotocol Example2
   (concat-str [suffix :string] :string))
 

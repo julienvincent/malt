@@ -96,6 +96,25 @@ editor/clojure-lsp.
    Api
   (create-plumburg [service name edges]
     (write-to-db (:db service) name edges)))
+
+;; We can also improve on the schemaless record type defined above:
+
+(def ?DataSource
+  [:fn {:error/message "Must be an instance of javax.sql.DataSource"}
+    (fn [value]
+      (instance? javax.sql.DataSource value))])
+
+;; Using `malt/defrecord` works identically to `clojure.core/defrecord` but overrides the
+;; generated `->Type` and `map->Type` constructors to add schema validation.
+(malt/defrecord Service
+  [db ?DataSource])
+
+;; Fails with a validation error
+(map->DataSource {:db 1})
+(->DataSource "Not a DataSource")
+
+;; Success!
+(map->DataSource {:db (jdbc/get-datasource {:uri "postgres://..."})})
 ```
 
 See [the test](test/io/julienvincent/malt_test.clj) for some more examples of how it works
