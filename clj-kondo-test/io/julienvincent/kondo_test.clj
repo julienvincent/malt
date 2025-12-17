@@ -1,18 +1,19 @@
 (ns io.julienvincent.kondo-test
-  (:require [io.julienvincent.malt :as malt]))
+  (:require
+   [io.julienvincent.malt :as malt]))
 
-(def some-malli-input-schema :int)
-(def some-malli-output-schema :int)
+(def ?SchemaReference :int)
 
 (malt/defprotocol Example
-  (a "Some docs about this API"
+  (a
+    "Some docs about this API"
     {:this-is "some-metadata"}
-    [some-malli-input-schema some-malli-input-schema] some-malli-output-schema)
+    [a ?SchemaReference b :int] ?SchemaReference)
   (b
     {:some-thing "meta"}
-    [some-malli-input-schema] some-malli-output-schema)
+    [a :int] :int)
 
-  (c [some-malli-input-schema some-malli-input-schema] some-malli-output-schema))
+  (c [a :int b :int] ?SchemaReference))
 
 (def example
   (reify Example

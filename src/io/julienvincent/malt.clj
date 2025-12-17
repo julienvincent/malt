@@ -26,19 +26,38 @@
                       data)))))
 
 (defmacro defprotocol
-  [name & opts+specs]
-  (let [[doc-string opts+specs] (if (string? (first opts+specs))
-                                  [(first opts+specs) (rest opts+specs)]
-                                  [nil opts+specs])
-        [attr-map opts+specs] (if (map? (first opts+specs))
-                                [(first opts+specs) (rest opts+specs)]
-                                [nil opts+specs])
+  [name & specs]
+  (let [[doc-string specs] (if (string? (first specs))
+                             [(first specs) (rest specs)]
+                             [nil specs])
+        [attr-map specs] (if (map? (first specs))
+                           [(first specs) (rest specs)]
+                           [nil specs])
         name-meta (merge (meta name)
                          attr-map
                          (when doc-string {:doc doc-string}))
         name-sym (with-meta name name-meta)
-        arg-syms-for-count (fn [n]
-                             (mapv #(symbol (str "arg" %)) (range 1 (inc n))))
+        parse-input-specs (fn [protocol-sym method-name input-schemas]
+                            (let [elems (vec input-schemas)]
+                              (when (odd? (count elems))
+                                (throw (IllegalArgumentException.
+                                        (str "Input schemas must be param/schema pairs for "
+                                             protocol-sym "/" method-name "; got "
+                                             (pr-str input-schemas)))))
+                              (let [params (vec (take-nth 2 elems))
+                                    schemas (vec (take-nth 2 (rest elems)))]
+                                (when-not (every? symbol? params)
+                                  (throw (IllegalArgumentException.
+                                          (str "Parameter names must be symbols for "
+                                               protocol-sym "/" method-name "; got "
+                                               (pr-str input-schemas)))))
+                                (when (some #{'this} params)
+                                  (throw (IllegalArgumentException.
+                                          (str "Parameter name must not be `this` for "
+                                               protocol-sym "/" method-name "; got "
+                                               (pr-str input-schemas)))))
+                                {:params params
+                                 :schemas schemas})))
         normalize-method (fn [method]
                            (let [[method-name & method-forms] method
                                  [method-doc method-forms] (if (string? (first method-forms))
@@ -62,24 +81,17 @@
                                          (str "Input schemas must be a vector for "
                                               name "/" method-name "; got "
                                               (pr-str input-schemas)))))
-                               (let [schema-meta {::input-schemas (vec input-schemas)
+                               (let [{:keys [params schemas]} (parse-input-specs name method-name input-schemas)
+                                     schema-meta {::input-schemas (vec schemas)
                                                   ::output-schema output-schema}
                                      method-meta (cond-> (merge (meta method-name) schema-meta)
                                                    method-doc (assoc :doc method-doc)
                                                    method-attr (merge method-attr))
                                      method-name (with-meta method-name method-meta)
-                                     arglist (into ['this] (arg-syms-for-count (count input-schemas)))]
+                                     arglist (into ['this] params)]
                                  (list method-name arglist)))))]
     `(clojure.core/defprotocol ~name-sym
-       ~@(mapv normalize-method opts+specs))))
-
-(defn- protocol-sigs
-  [protocol-sym]
-  (let [protocol-var (resolve protocol-sym)]
-    (when-not (var? protocol-var)
-      (throw (IllegalArgumentException.
-              (str "Protocol must resolve to a var; got " (pr-str protocol-sym)))))
-    (:sigs @protocol-var)))
+       ~@(mapv normalize-method specs))))
 
 (defn schema-vars-for-method
   [protocol-sym method-sym]

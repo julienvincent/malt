@@ -66,7 +66,7 @@ editor/clojure-lsp.
 
 ;; Define a protocol, substituting the parameters with malli schemas
 (malt/defprotocol Api
-  (create-plumburg [:string :int] ?Plumburg))
+  (create-plumburg [name :string edges :int] ?Plumburg))
 
 (defrecord Service [db])
 

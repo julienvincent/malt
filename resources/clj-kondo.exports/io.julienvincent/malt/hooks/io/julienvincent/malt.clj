@@ -10,6 +10,17 @@
 (defn- vector-node? [node]
   (= :vector (:tag node)))
 
+(defn- parse-input-schemas-node
+  [input-schemas-node]
+  (let [children (:children input-schemas-node)]
+    (if (even? (count children))
+      {:pair-form? true
+       :param-nodes (vec (take-nth 2 children))
+       :schema-nodes (vec (take-nth 2 (rest children)))}
+      {:pair-form? false
+       :param-nodes []
+       :schema-nodes []})))
+
 (defn- normalize-method [method-node]
   (let [[method-name & rest-children] (:children method-node)
         [doc-node rest-children] (if (and (seq rest-children)
@@ -24,24 +35,27 @@
                           (= 1 (count (filter vector-node? rest-children))))
         method-children (if schema-form?
                           (let [[input-schemas-node output-schema-node] rest-children
-                                input-sexpr (api/sexpr input-schemas-node)
-                                output-sexpr (api/sexpr output-schema-node)
-                                arity (count (:children input-schemas-node))
-                                method-meta (cond-> (merge (meta (api/sexpr method-name))
-                                                           {(schema-meta-keys :inputs) input-sexpr
-                                                            (schema-meta-keys :output) output-sexpr})
-                                              doc-node (assoc :doc (api/sexpr doc-node))
-                                              attr-node (merge (api/sexpr attr-node)))
-                                method-name (with-meta method-name method-meta)
-                                arg-vector (api/vector-node (into [(api/token-node 'this)]
-                                                                  (map (fn [idx]
-                                                                         (api/token-node
-                                                                          (symbol (str "arg" idx))))
-                                                                       (range 1 (inc arity)))))
-                                doc+attr (cond-> []
-                                           doc-node (conj doc-node)
-                                           attr-node (conj attr-node))]
-                            (into [method-name arg-vector] doc+attr))
+                                {:keys [pair-form? param-nodes schema-nodes]} (parse-input-schemas-node
+                                                                              input-schemas-node)]
+                            (if pair-form?
+                              (let [input-sexpr (mapv api/sexpr schema-nodes)
+                                    output-sexpr (api/sexpr output-schema-node)
+                                    arity (count schema-nodes)
+                                    method-meta (cond-> (merge (meta (api/sexpr method-name))
+                                                               {(schema-meta-keys :inputs) input-sexpr
+                                                                (schema-meta-keys :output) output-sexpr})
+                                                  doc-node (assoc :doc (api/sexpr doc-node))
+                                                  attr-node (merge (api/sexpr attr-node)))
+                                    method-name (with-meta method-name method-meta)
+                                    arg-vector (api/vector-node (into [(api/token-node 'this)]
+                                                                      (map (fn [node]
+                                                                             (api/token-node (api/sexpr node)))
+                                                                           param-nodes)))
+                                    doc+attr (cond-> []
+                                               doc-node (conj doc-node)
+                                               attr-node (conj attr-node))]
+                                (into [method-name arg-vector] doc+attr))
+                              (:children method-node)))
                           (:children method-node))]
     (api/list-node method-children)))
 
@@ -77,7 +91,10 @@
                                              (when (= 2 (count method-rest))
                                                (let [[input-schemas-node output-schema-node] method-rest]
                                                  (when (vector-node? input-schemas-node)
-                                                   (concat (:children input-schemas-node) [output-schema-node])))))))
+                                                   (let [{:keys [pair-form? schema-nodes]} (parse-input-schemas-node
+                                                                                            input-schemas-node)]
+                                                     (when pair-form?
+                                                       (concat schema-nodes [output-schema-node])))))))))
                                  (remove nil?))
         methods (mapv normalize-method rest-children)
         defprotocol-node (api/list-node (list* (api/token-node 'defprotocol)

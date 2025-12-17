@@ -6,8 +6,8 @@
    [io.julienvincent.malt :as malt]))
 
 (malt/defprotocol Example1
-  (method-1 [:int :int] :int)
-  (method-2 [:int] :int)
+  (method-1 [a :int b :int] :int)
+  (method-2 [a :int] :int)
   (method-3 [] :int)
   (method-4 [] :nil)
   (method-5 [] :nil))
@@ -63,7 +63,7 @@
                        (method-5 impl)))))
 
 (malt/defprotocol Example2
-  (concat-str [:string] :string))
+  (concat-str [suffix :string] :string))
 
 (malt/extend String
   Example2
