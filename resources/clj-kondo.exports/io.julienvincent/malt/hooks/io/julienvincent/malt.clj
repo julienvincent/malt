@@ -122,11 +122,16 @@
                                      defprotocol-node]))
                    defprotocol-node)]
     {:node (api/list-node [(api/token-node 'do)
-                           schema-def-node
+
+                           ;; The protocol node is placed first as lsp
+                           ;; references have a priority.
+                           new-node
+
+                           (with-meta schema-def-node (meta name-node))
+
                            ;; Generate fake usage to prevent clojure-lsp from
                            ;; reporting unused-var warnings
-                           (with-meta (api/token-node schema-var-sym) (meta node))
-                           new-node])}))
+                           (with-meta (api/token-node schema-var-sym) (meta name-node))])}))
 
 (defn extend [{:keys [node]}]
   (let [[_ & rest-children] (:children node)]
@@ -183,10 +188,13 @@
                                      defrecord-node]))
                    defrecord-node)]
     {:node (api/list-node [(api/token-node 'do)
+
+                           (with-meta new-node (meta node))
+
                            schema-def-node
                            instance-def-node
+
                            ;; Generate fake usages to prevent clojure-lsp from
                            ;; reporting unused-var lint warnings
                            (with-meta (api/token-node instance-var-sym) (meta node))
-                           (with-meta (api/token-node schema-var-sym) (meta node))
-                           new-node])}))
+                           (with-meta (api/token-node schema-var-sym) (meta node))])}))
