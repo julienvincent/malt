@@ -145,17 +145,36 @@
 
 (defn ^:no-doc resolve-schema-spec
   [schema-ns schema-spec]
-  (cond
-    (nil? schema-spec) (throw (IllegalArgumentException.
-                               "Schema must not be nil"))
-    (var? schema-spec) (deref schema-spec)
-    (symbol? schema-spec) (let [schema-var (ns-resolve schema-ns schema-spec)]
-                            (when-not (var? schema-var)
-                              (throw (IllegalArgumentException.
-                                      (str "Schema symbol must resolve to a var; got "
-                                           (pr-str schema-spec)))))
-                            (deref schema-var))
-    :else schema-spec))
+  (when (nil? schema-spec)
+    (throw (IllegalArgumentException. "Schema must not be nil")))
+  (letfn [(resolve-leaf [form strict?]
+            (cond
+              (var? form) (resolve-leaf (deref form) false)
+              (symbol? form) (let [schema-var (ns-resolve schema-ns form)]
+                               (cond
+                                 (var? schema-var) (resolve-leaf (deref schema-var) false)
+                                 strict? (throw (IllegalArgumentException.
+                                                 (str "Schema symbol must resolve to a var; got "
+                                                      (pr-str form))))
+                                 :else form))
+              :else form))
+          (resolve-walk [form strict?]
+            (let [form (resolve-leaf form strict?)]
+              (when (nil? form)
+                (throw (IllegalArgumentException. "Schema must not be nil")))
+              (cond
+                (seq? form) (let [evaluated (binding [*ns* schema-ns]
+                                              (eval form))]
+                              (resolve-walk evaluated false))
+                (vector? form) (mapv #(resolve-walk % false) form)
+                (map? form) (into (empty form)
+                                  (map (fn [[k v]]
+                                         [(resolve-walk k false)
+                                          (resolve-walk v false)]))
+                                  form)
+                (set? form) (set (map #(resolve-walk % false) form))
+                :else form)))]
+    (resolve-walk schema-spec true)))
 
 (defn schema-vars-for-method
   [protocol-sym method-sym]
@@ -372,11 +391,15 @@
                 (str "Argument list must be a vector for " qualified-protocol-sym "/" method-sym
                      "; got " (pr-str arglist)))))
       (let [[this-binding & param-bindings] arglist
-            params-syms (mapv (fn [binding]
-                                (if (symbol? binding) binding (gensym "param-")))
-                              param-bindings)
-            destructure-bindings (->> (map vector param-bindings params-syms)
-                                      (remove (fn [[binding _sym]] (symbol? binding)))
+            _ (when-not this-binding
+                (throw (IllegalArgumentException.
+                        (str "Argument list must include a `this` binding for "
+                             qualified-protocol-sym "/" method-sym
+                             "; got " (pr-str arglist)))))
+            this-sym (gensym "this-")
+            params-syms (mapv (fn [_binding] (gensym "param-")) param-bindings)
+            destructure-bindings (->> (cons [this-binding this-sym]
+                                            (map vector param-bindings params-syms))
                                       (mapcat identity)
                                       (vec))
             args-schema-sym (gensym "args-schema-")
@@ -389,7 +412,7 @@
             ex-data-base {:protocol (list 'quote qualified-protocol-sym)
                           :method (list 'quote method-sym)}]
         (list method-sym
-              (into [this-binding] params-syms)
+              (into [this-sym] params-syms)
               `(let [[~args-schema-sym ~args-validator-sym ~return-schema-sym ~return-validator-sym ~input-param-syms-sym]
                      (schema-vars-for-method '~qualified-protocol-sym '~method-sym)
                      ~ex-data-base-sym ~ex-data-base]
@@ -399,37 +422,41 @@
                                      ~input-param-syms-sym
                                      [~@params-syms]
                                      ~ex-data-base-sym))
-                 ~(if (seq destructure-bindings)
-                    `(let [~@destructure-bindings]
-                       (let [~result-sym (do ~@body)]
-                         (validate! ~return-schema-sym
-                                    ~result-sym
-                                    (assoc ~ex-data-base-sym
-                                           :phase :output
-                                           :type :malt/output-validation-failed
-                                           :validator ~return-validator-sym
-                                           :message ~(str "Invalid return value from '"
-                                                          (name method-sym)
-                                                          "' of "
-                                                          qualified-protocol-sym)))
-                         ~result-sym))
-                    `(let [~result-sym (do ~@body)]
-                       (validate! ~return-schema-sym
-                                  ~result-sym
-                                  (assoc ~ex-data-base-sym
-                                         :phase :output
-                                         :type :malt/output-validation-failed
-                                         :validator ~return-validator-sym
-                                         :message ~(str "Invalid return value from '"
-                                                        (name method-sym)
-                                                        "' of "
-                                                        qualified-protocol-sym)))
-                       ~result-sym))))))))
+                 (let [~@destructure-bindings]
+                   (let [~result-sym (do ~@body)]
+                     (validate! ~return-schema-sym
+                                ~result-sym
+                                (assoc ~ex-data-base-sym
+                                       :phase :output
+                                       :type :malt/output-validation-failed
+                                       :validator ~return-validator-sym
+                                       :message ~(str "Invalid return value from '"
+                                                      (name method-sym)
+                                                      "' of "
+                                                      qualified-protocol-sym)))
+                     ~result-sym))))))))
+
+(defn- normalize-extend-type-sym
+  [type-sym]
+  (if (and (symbol? type-sym) (namespace type-sym))
+    (let [ns-part (symbol (namespace type-sym))
+          alias-ns (get (ns-aliases *ns*) ns-part)
+          ns-name-str (clojure.lang.Compiler/munge
+                       (str (or (some-> alias-ns ns-name)
+                                ns-part)))
+          record-name-str (clojure.lang.Compiler/munge (name type-sym))]
+      (symbol (str ns-name-str "." record-name-str)))
+    type-sym))
 
 (defmacro extend
-  {:style/indent :defn}
+  ; {:style/indent :defn}
+  {:cljfmt/indent [[:inner 0] [:inner 1]]
+   :style.cljfmt/indent [[:inner 0] [:inner 1]]
+   :style/indent :reify}
+
   [type-sym & protocol+method-forms]
-  (let [grouped (parse-implementations protocol+method-forms)]
+  (let [type-sym (normalize-extend-type-sym type-sym)
+        grouped (parse-implementations protocol+method-forms)]
     (when (empty? grouped)
       (throw (IllegalArgumentException.
               (str "extend requires at least one protocol; got " (pr-str type-sym)))))

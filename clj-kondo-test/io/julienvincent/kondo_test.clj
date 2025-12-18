@@ -58,7 +58,8 @@
 
 (malt/extend Long
   Example
-  (a [_ _ _] "lol")
+  (a [_ _ _]
+    "lol")
   (b [_ _] nil)
   (c [_ a _b] a))
 

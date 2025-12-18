@@ -1,6 +1,7 @@
 (ns io.julienvincent.malt-test
   (:require
    [clojure.test :refer [deftest is]]
+   [io.julienvincent.fixture.external-record :as external-record]
    [io.julienvincent.malt :as malt]
    [io.julienvincent.test.extensions]
    [malli.core :as m]
@@ -165,3 +166,45 @@
   (is (= ["should be an instance of io.julienvincent.malt-test/Person"]
          (me/humanize
           (m/explain ?Person "not-person")))))
+
+(def ?PersonDef
+  [:map
+   [:name :string]])
+
+(defn make-api-schema [?type]
+  [:vector ?type])
+
+(malt/defprotocol Example3
+  (count-people [people [:vector ?PersonDef]
+                 belongings (make-api-schema :string)]
+    :int))
+
+(deftest unresolved-protocol-schema-forms
+  (let [impl (malt/implement Example3
+               (count-people [_ people _] (count people)))]
+
+    (is (= 2 (count-people impl [{:name "bob"} {:name "alice"}] ["desk"])))
+    (is (exception? clojure.lang.ExceptionInfo
+                    "Invalid parameter 'people' passed to 'count-people' of io.julienvincent.malt-test/Example3"
+                    (matchers/embeds
+                     {:type :malt/input-validation-failed
+                      :protocol 'io.julienvincent.malt-test/Example3
+                      :method 'count-people
+                      :input [[{:name 1}] '_]
+                      :errors (matchers/pred some?)})
+                    (count-people impl [{:name 1}] [])))))
+
+(malt/defrecord Person2
+  [def [:vector ?PersonDef]
+   belongings (make-api-schema :string)])
+
+(deftest unresolved-schema-forms
+  (is (= {:def [{:name "bob"}]
+          :belongings ["desk"]}
+         (into {} (->Person2 [{:name "bob"}]
+                             ["desk"])))))
+
+;; Implicit test.
+(malt/extend external-record/External
+  Example3
+  (count-people [_ _ _] 1))

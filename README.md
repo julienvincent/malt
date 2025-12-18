@@ -123,3 +123,16 @@ editor/clojure-lsp.
 ```
 
 See [the test](test/io/julienvincent/malt_test.clj) for some more examples of how it works
+
+## Formatting
+
+Currently cljfmt does not support loading config from the classpath like clj-kondo does, which means that I can't make
+formatting work the way I want out-of-the-box. The most relevant API is the `malt/extend` API which requires some indent
+config to display properly:
+
+```clojure
+;; .cljfmt.edn
+{:indents {io.julienvincent.malt/extend [[:inner 0] [:inner 1]]}}
+```
+
+This might not be needed in the future - see https://github.com/weavejester/cljfmt/issues/336

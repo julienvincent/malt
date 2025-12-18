@@ -1,2 +1,3 @@
 {:remove-multiple-non-indenting-spaces? true
- :sort-ns-references? true}
+ :sort-ns-references? true
+ :indents {io.julienvincent.malt/extend [[:inner 0] [:inner 1]]}}
