@@ -50,6 +50,7 @@
                          attr-map
                          (when doc-string {:doc doc-string}))
         name-sym (with-meta name name-meta)
+        protocol-schema-sym (symbol (str "?" name))
         parse-input-specs (fn [protocol-sym method-name input-schemas]
                             (let [elems (vec input-schemas)]
                               (when (odd? (count elems))
@@ -141,6 +142,11 @@
                                                        (m/validator (resolve-schema# return-schema-spec#))))]
                                      [method-kw# sig#]))
                                  sigs#)))))))
+       (def ~protocol-schema-sym
+         [:fn
+          {:error/message ~(str "should satisfy " (symbol (str (ns-name *ns*)) (str name)))}
+          (fn [value#]
+            (satisfies? ~name-sym value#))])
        (var ~name-sym))))
 
 (defn ^:no-doc resolve-schema-spec

@@ -67,6 +67,12 @@
 
 (defn defprotocol [{:keys [node]}]
   (let [[_ name-node & rest-children] (:children node)
+        name-sym (api/sexpr name-node)
+        protocol-name (name name-sym)
+        schema-var-sym (symbol (str "?" protocol-name))
+        schema-def-node (api/list-node [(api/token-node 'def)
+                                        (api/token-node schema-var-sym)
+                                        (api/token-node nil)])
         [doc-node rest-children] (if (and (seq rest-children)
                                           (string?
                                            (api/sexpr (first rest-children))))
@@ -115,7 +121,12 @@
                                      (api/vector-node bindings)
                                      defprotocol-node]))
                    defprotocol-node)]
-    {:node new-node}))
+    {:node (api/list-node [(api/token-node 'do)
+                           schema-def-node
+                           ;; Generate fake usage to prevent clojure-lsp from
+                           ;; reporting unused-var warnings
+                           (with-meta (api/token-node schema-var-sym) (meta node))
+                           new-node])}))
 
 (defn extend [{:keys [node]}]
   (let [[_ & rest-children] (:children node)]

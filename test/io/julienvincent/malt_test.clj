@@ -105,11 +105,16 @@
 (malt/defprotocol Example2
   (concat-str [suffix :string] :string))
 
+(deftest generates-protocol-schema
+  (let [impl (malt/implement Example2
+               (concat-str [_ _] ""))]
+    (is (m/validate ?Example2 impl))))
+
 (malt/extend String
   Example2
   (concat-str
-   [original suffix]
-   (str original suffix)))
+    [original suffix]
+    (str original suffix)))
 
 (deftest extend-methods-are-validated
   (is (= "abc123" (concat-str "abc" "123")))

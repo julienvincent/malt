@@ -40,6 +40,8 @@
 (c example 2 2)
 (c example "asd" "asd")
 
+(m/validate ?Example example)
+
 (def example2
   (malt/implement Example
     (a [_ _ _] 1)
