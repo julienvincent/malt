@@ -2,7 +2,9 @@
 
  :deps {metosin/malli {:mvn/version "0.20.0"}}
 
- :aliases {:test {:extra-paths ["test"]
+ :aliases {:lint {:extra-paths ["clj-kondo-test"]}
+
+           :test {:extra-paths ["test"]
                   :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
                                nubank/matcher-combinators {:mvn/version "3.9.2"}}
                   :main-opts ["-m" "kaocha.runner" "-c" "tests.edn"]}

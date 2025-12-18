@@ -9,6 +9,10 @@
   [x :int
    y ?SchemaReference])
 
+(malt/defrecord UnusedSchemaVars
+  [x :int])
+(->UnusedSchemaVars 1)
+
 (map->Point {:x 1 :y 1})
 (map->Point {:x "asd" :y 1})
 (->Point 1 1)

@@ -174,4 +174,8 @@
     {:node (api/list-node [(api/token-node 'do)
                            schema-def-node
                            instance-def-node
+                           ;; Generate fake usages to prevent clojure-lsp from
+                           ;; reporting unused-var lint warnings
+                           (with-meta (api/token-node instance-var-sym) (meta node))
+                           (with-meta (api/token-node schema-var-sym) (meta node))
                            new-node])}))
