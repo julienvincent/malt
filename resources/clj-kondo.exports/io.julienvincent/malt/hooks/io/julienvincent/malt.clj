@@ -127,8 +127,7 @@
 
                            ;; The protocol node is placed first as lsp
                            ;; references have a priority.
-                           new-node
-
+                           (with-meta new-node (meta name-node))
                            (with-meta schema-def-node (meta name-node))
 
                            ;; Generate fake usage to prevent clojure-lsp from
@@ -191,12 +190,13 @@
                    defrecord-node)]
     {:node (api/list-node [(api/token-node 'do)
 
-                           (with-meta new-node (meta node))
-
-                           schema-def-node
-                           instance-def-node
+                           ;; The protocol node is placed first as lsp
+                           ;; references have a priority.
+                           (with-meta new-node (meta name-node))
+                           (with-meta schema-def-node (meta name-node))
+                           (with-meta instance-def-node (meta name-node))
 
                            ;; Generate fake usages to prevent clojure-lsp from
                            ;; reporting unused-var lint warnings
-                           (with-meta (api/token-node instance-var-sym) (meta node))
-                           (with-meta (api/token-node schema-var-sym) (meta node))])}))
+                           (with-meta (api/token-node instance-var-sym) (meta name-node))
+                           (with-meta (api/token-node schema-var-sym) (meta name-node))])}))
