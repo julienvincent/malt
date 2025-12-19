@@ -10,6 +10,7 @@
    [matcher-combinators.test]))
 
 (malt/defprotocol Example0
+  "Protocol docs"
   (with-docstrings
     "Docstring"
     {:test/meta 1}
@@ -20,7 +21,8 @@
   (let [proto-data (into {} Example0)]
 
     (is (match?
-         {:sigs {:with-docstrings {:malt/params '[a b]
+         {:doc "Protocol docs"
+          :sigs {:with-docstrings {:malt/params '[a b]
                                    :malt/param-schemas {:a :int
                                                         :b :int}
                                    :malt/arguments-schema [:cat :int :int]
@@ -38,7 +40,10 @@
                                 :malt/return-validator (matchers/pred #(not (nil? %)))
                                 :arglists '([this])
                                 :doc nil}}}
-         proto-data))))
+         proto-data))
+
+    (is (= 1 (with-nothing (reify Example0
+                             (with-nothing [_] 1)))))))
 
 (malt/defprotocol Example1
   (method-1 [a :int b :int] :int)

@@ -114,6 +114,9 @@
                                  (list* method-name arglist doc+attr)))))]
     `(do
        (clojure.core/defprotocol ~name-sym
+         ~@(cond-> []
+             doc-string (conj doc-string)
+             attr-map (conj attr-map))
          ~@(mapv normalize-method specs))
        (let [protocol-var# (var ~name-sym)
              protocol-ns# (:ns (meta protocol-var#))

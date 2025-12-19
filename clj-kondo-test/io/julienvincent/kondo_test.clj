@@ -29,6 +29,15 @@
 
   (c [a :int b :int] ?SchemaReference))
 
+(malt/defprotocol ExampleWithDocs
+  "This is what the protocol does"
+  (get-docs [a :int] :string))
+
+(get-docs
+ (reify ExampleWithDocs
+   (get-docs [_ _] ""))
+ 1)
+
 (def example
   (reify Example
     (a [_ _ _] 1)

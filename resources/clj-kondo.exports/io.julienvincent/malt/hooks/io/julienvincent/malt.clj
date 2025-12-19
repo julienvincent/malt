@@ -109,9 +109,11 @@
                                                        (concat schema-nodes [output-schema-node])))))))))
                                  (remove nil?))
         methods (mapv normalize-method rest-children)
-        defprotocol-node (api/list-node (list* (api/token-node 'defprotocol)
-                                               name-node
-                                               methods))
+        defprotocol-node (api/list-node (concat (cond-> [(api/token-node 'defprotocol)
+                                                         name-node]
+                                                  doc-node (conj doc-node)
+                                                  attr-node (conj attr-node))
+                                                methods))
         new-node (if (seq method-schema-nodes)
                    (let [bindings (->> method-schema-nodes
                                        (mapcat (fn [schema-node]
