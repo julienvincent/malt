@@ -28,7 +28,7 @@
                                     [(first rest-children) (rest rest-children)]
                                     [nil rest-children])
         schema-form? (and (= 2 (count rest-children))
-                          (= 1 (count (filter vector-node? rest-children))))
+                          (vector-node? (first rest-children)))
         method-children (if schema-form?
                           (let [[input-schemas-node output-schema-node] rest-children
                                 {:keys [pair-form? param-nodes schema-nodes]} (parse-input-schemas-node

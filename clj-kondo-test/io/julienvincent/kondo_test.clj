@@ -29,15 +29,6 @@
 
   (c [a :int b :int] ?SchemaReference))
 
-(malt/defprotocol ExampleWithDocs
-  "This is what the protocol does"
-  (get-docs [a :int] :string))
-
-(get-docs
- (reify ExampleWithDocs
-   (get-docs [_ _] ""))
- 1)
-
 (def example
   (reify Example
     (a [_ _ _] 1)
@@ -82,3 +73,21 @@
 (m/validate ?Point (->Point 1 1))
 (m/validate ?PointSchema {:x 1
                           :y 1})
+
+(malt/defprotocol ExampleWithDocs
+  "This is what the protocol does"
+  (get-docs [a :int] :string))
+
+(get-docs
+ (reify ExampleWithDocs
+   (get-docs [_ _] ""))
+ 1)
+
+(malt/defprotocol NoArgs
+  (no-args [] [:vector :string]))
+
+(def with-no-args
+  (reify NoArgs
+    (no-args [_] "")))
+
+(no-args with-no-args)
