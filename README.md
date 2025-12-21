@@ -70,18 +70,18 @@ editor/clojure-lsp.
 
 (defrecord Service [db])
 
-;; The `malt/extend` API works like `clojure.core/extend-type` but adds
+;; The `malt/extend-type` API works like `clojure.core/extend-type` but adds
 ;; malli schema validation to the input arguments and returned result.
-(malt/extend Service
+(malt/extend-type Service
   Api
   (create-plumburg [service name edges]
     (write-to-db (:db service) name edges)))
 
 (create-plumburge (Service. db) "fred" "2") ;; Failed with a validation exception
 
-;; You can use `malt/implement` which works like `clojure.core/reify` but with validation
+;; You can use `malt/reify` which works like `clojure.core/reify` but with validation
 (defn create-service [db]
-  (malt/implement Api
+  (malt/reify Api
     (create-plumburg [_ name edges]
       (write-to-db db name edges))))
 
@@ -127,13 +127,12 @@ See [the test](test/io/julienvincent/malt_test.clj) for some more examples of ho
 ## Formatting
 
 Currently cljfmt does not support loading config from the classpath like clj-kondo does, which means that I can't make
-formatting work the way I want out-of-the-box. The most relevant API is the `malt/extend` API which requires some indent
-config to display properly:
+formatting work the way I want out-of-the-box.
 
 ```clojure
 ;; .cljfmt.edn
-{:indents {io.julienvincent.malt/extend [[:inner 0] [:inner 1]]
-           io.julienvincent.malt/implement [[:inner 0] [:inner 1]]
+{:indents {io.julienvincent.malt/extend-type [[:inner 0] [:inner 1]]
+           io.julienvincent.malt/reify [[:inner 0] [:inner 1]]
            io.julienvincent.malt/defrecord [[:inner 0] [:inner 1]]}}
 ```
 

@@ -134,11 +134,11 @@
                            ;; reporting unused-var warnings
                            (with-meta (api/token-node schema-var-sym) (meta name-node))])}))
 
-(defn extend [{:keys [node]}]
+(defn extend-type [{:keys [node]}]
   (let [[_ & rest-children] (:children node)]
     {:node (api/list-node (cons (api/token-node 'extend-type) rest-children))}))
 
-(defn implement [{:keys [node]}]
+(defn reify [{:keys [node]}]
   (let [[_ & rest-children] (:children node)]
     {:node (api/list-node (cons (api/token-node 'reify) rest-children))}))
 

@@ -1,6 +1,6 @@
 {:hooks {:analyze-call {io.julienvincent.malt/defprotocol hooks.io.julienvincent.malt/defprotocol
                         io.julienvincent.malt/defrecord hooks.io.julienvincent.malt/defrecord
 
-                        io.julienvincent.malt/extend hooks.io.julienvincent.malt/extend
+                        io.julienvincent.malt/extend-type hooks.io.julienvincent.malt/extend-type
 
-                        io.julienvincent.malt/implement hooks.io.julienvincent.malt/implement}}}
+                        io.julienvincent.malt/reify hooks.io.julienvincent.malt/reify}}}

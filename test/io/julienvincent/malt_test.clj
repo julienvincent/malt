@@ -53,7 +53,7 @@
   (method-5 [] :nil))
 
 (deftest implement-methods-are-validated
-  (let [impl (malt/implement Example1
+  (let [impl (malt/reify Example1
                (method-1 [_ a b] (+ a b))
                (method-2 [_ a] a)
                (method-3 [_] "123")
@@ -111,11 +111,11 @@
   (concat-str [suffix :string] :string))
 
 (deftest generates-protocol-schema
-  (let [impl (malt/implement Example2
+  (let [impl (malt/reify Example2
                (concat-str [_ _] ""))]
     (is (m/validate ?Example2 impl))))
 
-(malt/extend String
+(malt/extend-type String
   Example2
   (concat-str
     [original suffix]
@@ -190,7 +190,7 @@
     :int))
 
 (deftest unresolved-protocol-schema-forms
-  (let [impl (malt/implement Example3
+  (let [impl (malt/reify Example3
                (count-people [_ people _] (count people)))]
 
     (is (= 2 (count-people impl [{:name "bob"} {:name "alice"}] ["desk"])))
@@ -215,6 +215,6 @@
                              ["desk"])))))
 
 ;; Implicit test.
-(malt/extend external-record/External
+(malt/extend-type external-record/External
   Example3
   (count-people [_ _ _] 1))

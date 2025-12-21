@@ -43,7 +43,7 @@
 (m/validate ?Example example)
 
 (def example2
-  (malt/implement Example
+  (malt/reify Example
     (a [_ _ _] 1)
     (b [_ a] a)
     (c [_ a _b] a)))
@@ -52,13 +52,13 @@
 (b example2 2)
 (c example2 1 "asd")
 
-(malt/extend String
+(malt/extend-type String
   Example
   (a [_ a _b] a)
   (b [_ a] a)
   (c [_ a _b] a))
 
-(malt/extend Long
+(malt/extend-type Long
   Example
   (a [_ _ _]
     "lol")

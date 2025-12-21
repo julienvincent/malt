@@ -1,5 +1,5 @@
 (ns io.julienvincent.malt
-  (:refer-clojure :exclude [defprotocol extend defrecord])
+  (:refer-clojure :exclude [defprotocol extend-type defrecord reify])
   (:require
    [malli.core :as m]
    [malli.error :as me]))
@@ -457,7 +457,7 @@
       (symbol (str ns-name-str "." record-name-str)))
     type-sym))
 
-(defmacro extend
+(defmacro extend-type
   ; {:style/indent :defn}
   {:cljfmt/indent [[:inner 0] [:inner 1]]
    :style.cljfmt/indent [[:inner 0] [:inner 1]]
@@ -468,29 +468,29 @@
         grouped (parse-implementations protocol+method-forms)]
     (when (empty? grouped)
       (throw (IllegalArgumentException.
-              (str "extend requires at least one protocol; got " (pr-str type-sym)))))
+              (str "extend-type requires at least one protocol; got " (pr-str type-sym)))))
     `(clojure.core/extend-type ~type-sym
        ~@(mapcat (fn [[protocol-sym methods]]
                    (when-not protocol-sym
                      (throw (IllegalArgumentException.
-                             (str "Missing protocol in extend for " (pr-str type-sym)))))
+                             (str "Missing protocol in extend-type for " (pr-str type-sym)))))
                    (cons protocol-sym
                          (mapv (partial normalize-method-impl protocol-sym) methods)))
                  grouped))))
 
-(defmacro implement
+(defmacro reify
   {:style/indent :defn}
   [& protocol+method-forms]
   (let [grouped (parse-implementations protocol+method-forms)]
     (when (empty? grouped)
       (throw (IllegalArgumentException.
-              (str "implement requires at least one protocol; got "
+              (str "reify requires at least one protocol; got "
                    (pr-str protocol+method-forms)))))
     `(clojure.core/reify
        ~@(mapcat (fn [[protocol-sym methods]]
                    (when-not protocol-sym
                      (throw (IllegalArgumentException.
-                             (str "Missing protocol in implement; got "
+                             (str "Missing protocol in reify; got "
                                   (pr-str protocol+method-forms)))))
                    (cons protocol-sym
                          (mapv (partial normalize-method-impl protocol-sym) methods)))
