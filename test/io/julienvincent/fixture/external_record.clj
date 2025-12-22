@@ -1,3 +1,3 @@
 (ns io.julienvincent.fixture.external-record)
 
-(defrecord External [])
+(defrecord External [value])

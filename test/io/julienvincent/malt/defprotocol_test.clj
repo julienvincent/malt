@@ -1,11 +1,9 @@
-(ns io.julienvincent.malt-test
+(ns io.julienvincent.malt.defprotocol-test
   (:require
    [clojure.test :refer [deftest is]]
-   [io.julienvincent.fixture.external-record :as external-record]
    [io.julienvincent.malt :as malt]
    [io.julienvincent.test.extensions]
    [malli.core :as m]
-   [malli.error :as me]
    [matcher-combinators.matchers :as matchers]
    [matcher-combinators.test]))
 
@@ -62,39 +60,39 @@
 
     (is (= 3 (method-1 impl 1 2)))
     (is (exception? clojure.lang.ExceptionInfo
-                    "Invalid parameter 'a' passed to 'method-1' of io.julienvincent.malt-test/Example1"
+                    "Invalid parameter 'a' passed to 'method-1' of io.julienvincent.malt.defprotocol-test/Example1"
                     (matchers/equals
                      {:type :malt/input-validation-failed
-                      :protocol 'io.julienvincent.malt-test/Example1
+                      :protocol 'io.julienvincent.malt.defprotocol-test/Example1
                       :method 'method-1
                       :input ["abc" '_]
                       :errors [["should be an integer"]]})
                     (method-1 impl "abc" 2)))
     (is (exception? clojure.lang.ExceptionInfo
-                    "Invalid parameter 'b' passed to 'method-1' of io.julienvincent.malt-test/Example1"
+                    "Invalid parameter 'b' passed to 'method-1' of io.julienvincent.malt.defprotocol-test/Example1"
                     (matchers/equals
                      {:type :malt/input-validation-failed
-                      :protocol 'io.julienvincent.malt-test/Example1
+                      :protocol 'io.julienvincent.malt.defprotocol-test/Example1
                       :method 'method-1
                       :input ['_ "abc"]
                       :errors [nil ["should be an integer"]]})
                     (method-1 impl 2 "abc")))
 
     (is (exception? clojure.lang.ExceptionInfo
-                    "Invalid parameter 'a' passed to 'method-2' of io.julienvincent.malt-test/Example1"
+                    "Invalid parameter 'a' passed to 'method-2' of io.julienvincent.malt.defprotocol-test/Example1"
                     (matchers/equals
                      {:type :malt/input-validation-failed
-                      :protocol 'io.julienvincent.malt-test/Example1
+                      :protocol 'io.julienvincent.malt.defprotocol-test/Example1
                       :method 'method-2
                       :input ["123"]
                       :errors [["should be an integer"]]})
                     (method-2 impl "123")))
 
     (is (exception? Exception
-                    "Invalid return value from 'method-3' of io.julienvincent.malt-test/Example1"
+                    "Invalid return value from 'method-3' of io.julienvincent.malt.defprotocol-test/Example1"
                     (matchers/equals
                      {:type :malt/output-validation-failed
-                      :protocol 'io.julienvincent.malt-test/Example1
+                      :protocol 'io.julienvincent.malt.defprotocol-test/Example1
                       :method 'method-3
                       :output "123"
                       :errors ["should be an integer"]})
@@ -102,7 +100,7 @@
 
     (is (nil? (method-4 impl)))
     (is (exception? Exception
-                    "Invalid return value from 'method-5' of io.julienvincent.malt-test/Example1"
+                    "Invalid return value from 'method-5' of io.julienvincent.malt.defprotocol-test/Example1"
                     {:output 1
                      :errors ["should be nil"]}
                     (method-5 impl)))))
@@ -114,68 +112,6 @@
   (let [impl (malt/reify Example2
                (concat-str [_ _] ""))]
     (is (m/validate ?Example2 impl))))
-
-(malt/extend-type String
-  Example2
-  (concat-str
-    [original suffix]
-    (str original suffix)))
-
-(deftest extend-methods-are-validated
-  (is (= "abc123" (concat-str "abc" "123")))
-
-  (is (exception? clojure.lang.ExceptionInfo
-                  "Invalid parameter 'suffix' passed to 'concat-str' of io.julienvincent.malt-test/Example2"
-                  (matchers/equals
-                   {:type :malt/input-validation-failed
-                    :protocol 'io.julienvincent.malt-test/Example2
-                    :method 'concat-str
-                    :input [1]
-                    :errors [["should be a string"]]})
-                  (concat-str "abc" 1))))
-
-(malt/defrecord Person
-  [name :string
-   age :int])
-
-(deftest record-constructors-are-validated
-  (is (= {:name "bob" :age 1}
-         (into {} (->Person "bob" 1))))
-
-  (is (= {:name "bob" :age 1}
-         (into {} (map->Person {:name "bob" :age 1}))))
-
-  (is (exception? clojure.lang.ExceptionInfo
-                  "Invalid parameter 'name' passed to constructor '->Person' of io.julienvincent.malt-test/Person"
-                  (matchers/equals
-                   {:type :malt/record-validation-failed
-                    :record 'io.julienvincent.malt-test/Person
-                    :constructor '->Person
-                    :input [1 '_]
-                    :errors [["should be a string"]]})
-                  (->Person 1 2)))
-
-  (is (exception? clojure.lang.ExceptionInfo
-                  "Invalid parameter passed to constructor 'map->Person' of io.julienvincent.malt-test/Person"
-                  (matchers/equals
-                   {:type :malt/record-validation-failed
-                    :record 'io.julienvincent.malt-test/Person
-                    :constructor 'map->Person
-                    :input {:name "bob" :age "1"}
-                    :errors {:age ["should be an integer"]}})
-                  (map->Person {:name "bob" :age "1"}))))
-
-(deftest record-schemas-are-defined
-  (is (= [:map {:closed true}
-          [:name :string]
-          [:age :int]]
-         ?PersonSchema))
-  (is (not (nil? ?Person)))
-
-  (is (m/validate ?Person (->Person "bob" 1)))
-  (is (= ["should be an instance of io.julienvincent.malt-test/Person"]
-         (me/humanize
-          (m/explain ?Person "not-person")))))
 
 (def ?PersonDef
   [:map
@@ -195,26 +131,11 @@
 
     (is (= 2 (count-people impl [{:name "bob"} {:name "alice"}] ["desk"])))
     (is (exception? clojure.lang.ExceptionInfo
-                    "Invalid parameter 'people' passed to 'count-people' of io.julienvincent.malt-test/Example3"
+                    "Invalid parameter 'people' passed to 'count-people' of io.julienvincent.malt.defprotocol-test/Example3"
                     (matchers/embeds
                      {:type :malt/input-validation-failed
-                      :protocol 'io.julienvincent.malt-test/Example3
+                      :protocol 'io.julienvincent.malt.defprotocol-test/Example3
                       :method 'count-people
                       :input [[{:name 1}] '_]
                       :errors (matchers/pred some?)})
                     (count-people impl [{:name 1}] [])))))
-
-(malt/defrecord Person2
-  [def [:vector ?PersonDef]
-   belongings (make-api-schema :string)])
-
-(deftest unresolved-schema-forms
-  (is (= {:def [{:name "bob"}]
-          :belongings ["desk"]}
-         (into {} (->Person2 [{:name "bob"}]
-                             ["desk"])))))
-
-;; Implicit test.
-(malt/extend-type external-record/External
-  Example3
-  (count-people [_ _ _] 1))

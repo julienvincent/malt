@@ -212,6 +212,8 @@
        return-validator
        input-param-syms])))
 
+(declare parse-implementations normalize-method-impl)
+
 (defmacro defrecord
   {:style/indent :defn}
   [name & specs]
@@ -244,9 +246,27 @@
               instance-schema-sym (symbol (str "?" name))
               record-ns-sym (ns-name *ns*)
               qualified-record-sym (symbol (str record-ns-sym) (str name))
-              field-ks (mapv (comp keyword clojure.core/name) params)]
+              field-ks (mapv (comp keyword clojure.core/name) params)
+              grouped-impls (parse-implementations impls)
+              normalized-impls (mapcat (fn [[protocol-sym methods]]
+                                         (when-not protocol-sym
+                                           (throw (IllegalArgumentException.
+                                                   (str "Missing protocol in defrecord for "
+                                                        (pr-str name-sym)))))
+                                         (let [protocol-var (resolve protocol-sym)
+                                               protocol-sigs (when (var? protocol-var)
+                                                               (:sigs @protocol-var))
+                                               malt-protocol? (and (map? protocol-sigs)
+                                                                   (some (fn [sig]
+                                                                           (contains? sig :malt/return-schema))
+                                                                         (vals protocol-sigs)))]
+                                           (cons protocol-sym
+                                                 (if malt-protocol?
+                                                   (mapv (partial normalize-method-impl protocol-sym) methods)
+                                                   methods))))
+                                       grouped-impls)]
           `(do
-             (clojure.core/defrecord ~name-sym [~@params] ~@impls)
+             (clojure.core/defrecord ~name-sym [~@params] ~@normalized-impls)
              (let [orig-ctor# ~ctor-sym
                    orig-map-ctor# ~map-ctor-sym
                    schema-ns# (the-ns '~record-ns-sym)
