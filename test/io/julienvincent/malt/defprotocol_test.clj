@@ -20,6 +20,7 @@
 
     (is (match?
          {:doc "Protocol docs"
+          :malt/protocol true
           :sigs {:with-docstrings {:malt/params '[a b]
                                    :malt/param-schemas {:a :int
                                                         :b :int}
@@ -139,3 +140,12 @@
                       :input [[{:name 1}] '_]
                       :errors (matchers/pred some?)})
                     (count-people impl [{:name 1}] [])))))
+
+(defprotocol NativeExample
+  (foobar [this input]))
+
+(deftest native-protocol-reify-test
+  (let [impl (malt/reify NativeExample
+               (foobar [_ input] input))]
+
+    (is (= 2 (foobar impl 2)))))

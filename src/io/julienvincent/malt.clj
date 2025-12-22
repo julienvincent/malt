@@ -39,6 +39,7 @@
         (throw (ex-info msg data))))))
 
 (defmacro defprotocol
+  {:style/indent :defn}
   [name & specs]
   (let [[doc-string specs] (if (string? (first specs))
                              [(first specs) (rest specs)]
@@ -125,26 +126,27 @@
          (alter-var-root
           protocol-var#
           (fn [proto#]
-            (update proto#
-                    :sigs
-                    (fn [sigs#]
-                      (into {}
-                            (map (fn [[method-kw# sig#]]
-                                   (let [args-schema-spec# (:malt/arguments-schema sig#)
-                                         return-schema-spec# (:malt/return-schema sig#)
-                                         sig# (cond-> sig#
-                                                (seq args-schema-spec#)
-                                                (assoc :malt/arguments-validator
-                                                       (m/validator
-                                                        (into [:cat]
-                                                              (mapv resolve-schema#
-                                                                    (rest args-schema-spec#)))))
+            (update
+             (assoc proto# :malt/protocol true)
+             :sigs
+             (fn [sigs#]
+               (into {}
+                     (map (fn [[method-kw# sig#]]
+                            (let [args-schema-spec# (:malt/arguments-schema sig#)
+                                  return-schema-spec# (:malt/return-schema sig#)
+                                  sig# (cond-> sig#
+                                         (seq args-schema-spec#)
+                                         (assoc :malt/arguments-validator
+                                                (m/validator
+                                                 (into [:cat]
+                                                       (mapv resolve-schema#
+                                                             (rest args-schema-spec#)))))
 
-                                                return-schema-spec#
-                                                (assoc :malt/return-validator
-                                                       (m/validator (resolve-schema# return-schema-spec#))))]
-                                     [method-kw# sig#]))
-                                 sigs#)))))))
+                                         return-schema-spec#
+                                         (assoc :malt/return-validator
+                                                (m/validator (resolve-schema# return-schema-spec#))))]
+                              [method-kw# sig#]))
+                          sigs#)))))))
        (def ~protocol-schema-sym
          [:fn
           {:error/message ~(str "should satisfy " (symbol (str (ns-name *ns*)) (str name)))}
@@ -254,12 +256,8 @@
                                                    (str "Missing protocol in defrecord for "
                                                         (pr-str name-sym)))))
                                          (let [protocol-var (resolve protocol-sym)
-                                               protocol-sigs (when (var? protocol-var)
-                                                               (:sigs @protocol-var))
-                                               malt-protocol? (and (map? protocol-sigs)
-                                                                   (some (fn [sig]
-                                                                           (contains? sig :malt/return-schema))
-                                                                         (vals protocol-sigs)))]
+                                               malt-protocol? (and (var? protocol-var)
+                                                                   (:malt/protocol @protocol-var))]
                                            (cons protocol-sym
                                                  (if malt-protocol?
                                                    (mapv (partial normalize-method-impl protocol-sym) methods)
@@ -478,11 +476,7 @@
     type-sym))
 
 (defmacro extend-type
-  ; {:style/indent :defn}
-  {:cljfmt/indent [[:inner 0] [:inner 1]]
-   :style.cljfmt/indent [[:inner 0] [:inner 1]]
-   :style/indent :reify}
-
+  {:style/indent :defn}
   [type-sym & protocol+method-forms]
   (let [type-sym (normalize-extend-type-sym type-sym)
         grouped (parse-implementations protocol+method-forms)]
@@ -494,8 +488,13 @@
                    (when-not protocol-sym
                      (throw (IllegalArgumentException.
                              (str "Missing protocol in extend-type for " (pr-str type-sym)))))
-                   (cons protocol-sym
-                         (mapv (partial normalize-method-impl protocol-sym) methods)))
+                   (let [protocol-var (resolve protocol-sym)
+                         malt-protocol? (and (var? protocol-var)
+                                             (:malt/protocol @protocol-var))]
+                     (cons protocol-sym
+                           (if malt-protocol?
+                             (mapv (partial normalize-method-impl protocol-sym) methods)
+                             methods))))
                  grouped))))
 
 (defmacro reify
@@ -512,6 +511,11 @@
                      (throw (IllegalArgumentException.
                              (str "Missing protocol in reify; got "
                                   (pr-str protocol+method-forms)))))
-                   (cons protocol-sym
-                         (mapv (partial normalize-method-impl protocol-sym) methods)))
+                   (let [protocol-var (resolve protocol-sym)
+                         malt-protocol? (and (var? protocol-var)
+                                             (:malt/protocol @protocol-var))]
+                     (cons protocol-sym
+                           (if malt-protocol?
+                             (mapv (partial normalize-method-impl protocol-sym) methods)
+                             methods))))
                  grouped))))

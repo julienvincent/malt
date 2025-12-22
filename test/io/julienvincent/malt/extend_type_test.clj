@@ -41,3 +41,14 @@
 
 (deftest external-extension-test
   (is (= 4 (add (external-record/->External 3) 1))))
+
+(defprotocol NativeApi
+  (foobar [this input]))
+
+(malt/extend-type external-record/External
+  NativeApi
+  (foobar [_ input] input))
+
+(deftest native-protocol-extensions-test
+  (let [impl (external-record/->External 3)]
+    (is (= 1 (foobar impl 1)))))

@@ -91,3 +91,21 @@
                       :input [1]
                       :errors [["should be a string"]]})
                     (create-user impl 1)))))
+
+(defprotocol NativeApi
+  (foobar [this input]))
+
+(malt/defrecord Service2
+  [name-prefix :string]
+
+  Api
+  (create-user [{:keys [name-prefix]} name]
+    (str name-prefix name))
+
+  NativeApi
+  (foobar [_ input] input))
+
+(deftest native-protocol-extensions-test
+  (let [impl (->Service2 "some-prefix-")]
+    (is (= "some-prefix-john" (create-user impl "john")))
+    (is (= 1 (foobar impl 1)))))
