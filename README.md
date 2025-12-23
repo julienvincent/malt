@@ -165,6 +165,34 @@ Evaluating the protocol var shows the stored sigs:
    :malt/return-validator #object[...]}}}
 ```
 
+### `malt/defrecord`
+
+Inline protocol implementations are validated when the protocol was defined with `malt/defprotocol`. This lets records
+serve as concrete, validated implementations while still validating their own construction.
+
+```clojure
+(malt/defrecord UserStoreImpl
+  [db ?DataSource]
+
+  UserStore
+  (create-user [_ name age]
+    (persist-user db name age))
+  (delete-user [_ id]
+    (delete-user! db id)))
+```
+
+- Accepts a vector of field/schema pairs, then optional protocol implementations.
+- Overrides `->Record` and `map->Record` to validate constructor inputs.
+- Produces `?RecordSchema` (map shape) and `?Record` (instance check) schemas.
+
+Exports:
+
+- `UserStoreImpl`: the record type.
+- `->UserStoreImpl`: validated positional constructor.
+- `map->UserStoreImpl`: validated map constructor.
+- `?UserStoreImplSchema`: Malli `:map` schema for the record fields.
+- `?UserStoreImpl`: Malli schema that checks `instance?` for the record.
+
 ### `malt/extend-type`
 
 This is the main way to attach validation to concrete types without changing how you structure code. You can continue to
@@ -206,34 +234,6 @@ at runtime.
 - Accepts the same syntax as `clojure.core/reify`.
 - Validates inputs and outputs for each protocol method.
 - Produces an anonymous instance that satisfies the protocol.
-
-### `malt/defrecord`
-
-Inline protocol implementations are validated when the protocol was defined with `malt/defprotocol`. This lets records
-serve as concrete, validated implementations while still validating their own construction.
-
-```clojure
-(malt/defrecord UserStoreImpl
-  [db ?DataSource]
-
-  UserStore
-  (create-user [_ name age]
-    (persist-user db name age))
-  (delete-user [_ id]
-    (delete-user! db id)))
-```
-
-- Accepts a vector of field/schema pairs, then optional protocol implementations.
-- Overrides `->Record` and `map->Record` to validate constructor inputs.
-- Produces `?RecordSchema` (map shape) and `?Record` (instance check) schemas.
-
-Exports:
-
-- `UserStoreImpl`: the record type.
-- `->UserStoreImpl`: validated positional constructor.
-- `map->UserStoreImpl`: validated map constructor.
-- `?UserStoreImplSchema`: Malli `:map` schema for the record fields.
-- `?UserStoreImpl`: Malli schema that checks `instance?` for the record.
 
 ### Validation errors
 
