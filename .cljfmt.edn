@@ -1,6 +1,6 @@
 {:remove-multiple-non-indenting-spaces? true
  :sort-ns-references? true
- :indents {io.julienvincent.malt/extend-type [[:inner 0] [:inner 1]]
-           io.julienvincent.malt/reify [[:inner 0] [:inner 1]]
-           io.julienvincent.malt/defprotocol [[:inner 0] [:inner 1]]
-           io.julienvincent.malt/defrecord [[:inner 0] [:inner 1]]}}
+ :extra-indents {io.julienvincent.malt/extend-type [[:inner 0] [:inner 1]]
+                 io.julienvincent.malt/reify [[:inner 0] [:inner 1]]
+                 io.julienvincent.malt/defprotocol [[:inner 0] [:inner 1]]
+                 io.julienvincent.malt/defrecord [[:inner 0] [:inner 1]]}}
