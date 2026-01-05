@@ -39,7 +39,6 @@
         (throw (ex-info msg data))))))
 
 (defmacro defprotocol
-  {:style/indent :defn}
   [name & specs]
   (let [[doc-string specs] (if (string? (first specs))
                              [(first specs) (rest specs)]
@@ -217,7 +216,6 @@
 (declare parse-implementations normalize-method-impl)
 
 (defmacro defrecord
-  {:style/indent :defn}
   [name & specs]
   (let [[doc-string specs] (if (string? (first specs))
                              [(first specs) (rest specs)]
@@ -476,7 +474,6 @@
     type-sym))
 
 (defmacro extend-type
-  {:style/indent :defn}
   [type-sym & protocol+method-forms]
   (let [type-sym (normalize-extend-type-sym type-sym)
         grouped (parse-implementations protocol+method-forms)]
@@ -498,7 +495,6 @@
                  grouped))))
 
 (defmacro reify
-  {:style/indent :defn}
   [& protocol+method-forms]
   (let [grouped (parse-implementations protocol+method-forms)]
     (when (empty? grouped)
