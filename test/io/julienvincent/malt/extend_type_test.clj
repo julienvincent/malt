@@ -12,8 +12,7 @@
 
 (malt/extend-type String
   Example
-  (concat-str
-    [original suffix]
+  (concat-str [original suffix]
     (str original suffix)))
 
 (deftest extend-methods-are-validated

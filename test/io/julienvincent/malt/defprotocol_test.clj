@@ -12,8 +12,10 @@
   (with-docstrings
     "Docstring"
     {:test/meta 1}
-    [a :int b :int] :int)
-  (with-nothing [] :int))
+    [a :int b :int]
+    :int)
+  (with-nothing []
+    :int))
 
 (deftest protocol-metadata
   (let [proto-data (into {} Example0)]
@@ -107,11 +109,13 @@
                     (method-5 impl)))))
 
 (malt/defprotocol Example2
-  (concat-str [suffix :string] :string))
+  (concat-str [suffix :string]
+    :string))
 
 (deftest generates-protocol-schema
   (let [impl (malt/reify Example2
-               (concat-str [_ _] ""))]
+               (concat-str [_ _]
+                 ""))]
     (is (m/validate ?Example2 impl))))
 
 (def ?PersonDef

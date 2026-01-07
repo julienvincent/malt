@@ -52,6 +52,13 @@
 (b example2 2)
 (c example2 1 "asd")
 
+;; Checking formatting
+(malt/reify
+  Example
+  (a [_ _ _] 1)
+  (b [_ a] a)
+  (c [_ a _b] a))
+
 (malt/extend-type String
   Example
   (a [_ a _b] a)
