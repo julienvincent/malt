@@ -130,6 +130,23 @@
                  belongings (make-api-schema :string)]
     :int))
 
+(deftest var-referenced-protocol-metadata
+  (let [proto-data (into {} Example3)]
+    (is (match?
+         {:malt/protocol true
+          :sigs {:count-people {:malt/params '[people belongings]
+                                :malt/param-schemas {:people [:vector
+                                                              [:map
+                                                               [:name :string]]]
+                                                     :belongings [:vector :string]}
+                                :malt/arguments-schema [:cat
+                                                        [:vector
+                                                         [:map
+                                                          [:name :string]]]
+                                                        [:vector :string]]
+                                :malt/return-schema :int}}}
+         proto-data))))
+
 (deftest unresolved-protocol-schema-forms
   (let [impl (malt/reify Example3
                (count-people [_ people _] (count people)))]

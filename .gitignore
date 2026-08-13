@@ -6,5 +6,6 @@
 .nrepl-port
 
 target
+local
 
 deps.local.edn

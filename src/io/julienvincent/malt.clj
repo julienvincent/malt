@@ -147,31 +147,44 @@
              (fn [sigs#]
                (into {}
                      (map (fn [[method-kw# sig#]]
-                            (let [args-schema-spec# (:malt/arguments-schema sig#)
-                                  return-schema-spec# (:malt/return-schema sig#)
-                                  throws-syms# (:malt/throws sig#)
-                                  resolved-throws# (when (seq throws-syms#)
-                                                     (mapv (fn [throws-sym#]
-                                                             (let [resolved-var# (ns-resolve protocol-ns# throws-sym#)
-                                                                   _# (when-not (var? resolved-var#)
-                                                                        (throw (IllegalArgumentException.
-                                                                                (str "throws symbol '" throws-sym#
-                                                                                     "' must resolve to a var"))))
-                                                                   definition# @resolved-var#]
-                                                               (malt.error/validate-definition! definition#)
-                                                               definition#))
-                                                           throws-syms#))
-                                  sig# (cond-> sig#
-                                         (seq args-schema-spec#)
-                                         (assoc :malt/arguments-validator
-                                                (m/validator
-                                                 (into [:cat]
-                                                       (mapv resolve-schema#
-                                                             (rest args-schema-spec#)))))
+                             (let [args-schema-spec# (:malt/arguments-schema sig#)
+                                   return-schema-spec# (:malt/return-schema sig#)
+                                   throws-syms# (:malt/throws sig#)
+                                   resolved-arg-schemas# (when (seq args-schema-spec#)
+                                                           (mapv resolve-schema#
+                                                                 (rest args-schema-spec#)))
+                                   resolved-return-schema# (when return-schema-spec#
+                                                             (resolve-schema# return-schema-spec#))
+                                   resolved-throws# (when (seq throws-syms#)
+                                                      (mapv (fn [throws-sym#]
+                                                              (let [resolved-var# (ns-resolve protocol-ns# throws-sym#)
+                                                                    _# (when-not (var? resolved-var#)
+                                                                         (throw (IllegalArgumentException.
+                                                                                 (str "throws symbol '" throws-sym#
+                                                                                      "' must resolve to a var"))))
+                                                                    definition# @resolved-var#]
+                                                                (malt.error/validate-definition! definition#)
+                                                                definition#))
+                                                            throws-syms#))
+                                   sig# (cond-> sig#
+                                          resolved-arg-schemas#
+                                          (assoc :malt/arguments-schema
+                                                 (into [:cat] resolved-arg-schemas#)
+                                                 :malt/arguments-validator
+                                                 (m/validator
+                                                  (into [:cat] resolved-arg-schemas#)))
 
-                                         return-schema-spec#
-                                         (assoc :malt/return-validator
-                                                (m/validator (resolve-schema# return-schema-spec#)))
+                                          (and resolved-arg-schemas#
+                                               (:malt/param-schemas sig#))
+                                          (assoc :malt/param-schemas
+                                                 (zipmap (mapv (comp keyword clojure.core/name)
+                                                               (:malt/params sig#))
+                                                         resolved-arg-schemas#))
+
+                                          resolved-return-schema#
+                                          (assoc :malt/return-schema resolved-return-schema#
+                                                 :malt/return-validator
+                                                 (m/validator resolved-return-schema#))
 
                                          resolved-throws#
                                          (assoc :malt/throws resolved-throws#
