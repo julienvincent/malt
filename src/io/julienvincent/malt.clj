@@ -1,6 +1,7 @@
 (ns io.julienvincent.malt
   (:refer-clojure :exclude [defprotocol extend-type defrecord reify])
   (:require
+   [io.julienvincent.malt.error :as malt.error]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -83,14 +84,26 @@
                                                               [(first method-forms)
                                                                (clojure.core/rest method-forms)]
                                                               [nil method-forms])]
-                             (when-not (= 2 (count method-forms))
+                             (when-not (<= 2 (count method-forms) 3)
                                (throw (IllegalArgumentException.
                                        (str "Method spec must be of the form "
                                             "(" method-name " <optional docstring> "
                                             "<optional metadata> [input-schema-1 ...] "
-                                            "output-schema) for "
+                                            "output-schema <optional (throws [...])>) for "
                                             name "; got " (pr-str method)))))
-                             (let [[input-schemas output-schema] method-forms]
+                             (let [[input-schemas output-schema & rest-forms] method-forms
+                                   throws-form (first rest-forms)
+                                   _ (when throws-form
+                                       (when-not (and (seq? throws-form)
+                                                      (= 'throws (first throws-form))
+                                                      (vector? (second throws-form)))
+                                         (throw (IllegalArgumentException.
+                                                 (str "throws clause must be of the form "
+                                                      "(throws [def1 def2 ...]) for "
+                                                      name "/" method-name "; got "
+                                                      (pr-str throws-form))))))
+                                   throws-syms (when throws-form
+                                                 (second throws-form))]
                                (when-not (vector? input-schemas)
                                  (throw (IllegalArgumentException.
                                          (str "Input schemas must be a vector for "
@@ -103,7 +116,9 @@
                                                                                    (into [:cat] schemas))
                                                           :malt/return-schema output-schema}
                                                    (seq params)
-                                                   (assoc :malt/param-schemas schema-map))
+                                                   (assoc :malt/param-schemas schema-map)
+                                                   throws-syms
+                                                   (assoc :malt/throws (vec throws-syms)))
                                      method-meta (cond-> (merge (meta method-name) schema-meta)
                                                    method-doc (assoc :doc method-doc)
                                                    method-attr (merge method-attr))
@@ -134,6 +149,18 @@
                      (map (fn [[method-kw# sig#]]
                             (let [args-schema-spec# (:malt/arguments-schema sig#)
                                   return-schema-spec# (:malt/return-schema sig#)
+                                  throws-syms# (:malt/throws sig#)
+                                  resolved-throws# (when (seq throws-syms#)
+                                                     (mapv (fn [throws-sym#]
+                                                             (let [resolved-var# (ns-resolve protocol-ns# throws-sym#)
+                                                                   _# (when-not (var? resolved-var#)
+                                                                        (throw (IllegalArgumentException.
+                                                                                (str "throws symbol '" throws-sym#
+                                                                                     "' must resolve to a var"))))
+                                                                   definition# @resolved-var#]
+                                                               (malt.error/validate-definition! definition#)
+                                                               definition#))
+                                                           throws-syms#))
                                   sig# (cond-> sig#
                                          (seq args-schema-spec#)
                                          (assoc :malt/arguments-validator
@@ -144,7 +171,17 @@
 
                                          return-schema-spec#
                                          (assoc :malt/return-validator
-                                                (m/validator (resolve-schema# return-schema-spec#))))]
+                                                (m/validator (resolve-schema# return-schema-spec#)))
+
+                                         resolved-throws#
+                                         (assoc :malt/throws resolved-throws#
+                                                :malt/exception-validators
+                                                (into {}
+                                                      (keep (fn [definition#]
+                                                              (when-let [schema-spec# (:schema definition#)]
+                                                                [(:code definition#)
+                                                                 (m/validator schema-spec#)])))
+                                                      resolved-throws#)))]
                               [method-kw# sig#]))
                           sigs#)))))))
        (def ~protocol-schema-sym
@@ -201,6 +238,8 @@
           return-schema-spec (:malt/return-schema method-sig)
           return-validator (:malt/return-validator method-sig)
           input-param-syms (vec (:malt/params method-sig))
+          throws-defs (:malt/throws method-sig)
+          exception-validators (:malt/exception-validators method-sig)
           protocol-ns (:ns (meta protocol-var))
           resolve-schema (fn [schema-spec]
                            (resolve-schema-spec protocol-ns schema-spec))]
@@ -212,7 +251,9 @@
        args-validator
        (resolve-schema return-schema-spec)
        return-validator
-       input-param-syms])))
+       input-param-syms
+       throws-defs
+       exception-validators])))
 
 (declare parse-implementations normalize-method-impl)
 
@@ -401,6 +442,42 @@
              (conj current-methods (first remaining))
              grouped))))
 
+(defn ^:no-doc check-throws!
+  [caught-exception throws-defs exception-validators qualified-protocol-sym method-sym]
+  (let [ex-data-map (when (instance? clojure.lang.IExceptionInfo caught-exception)
+                      (ex-data caught-exception))]
+    (when (= :malt/error (:type ex-data-map))
+      (let [error-code (:code ex-data-map)
+            matching-def (some (fn [def-map]
+                                 (when (= error-code (:code def-map))
+                                   def-map))
+                               throws-defs)]
+        (when matching-def
+          (if-let [validator (get exception-validators error-code)]
+            (let [error-data (:data ex-data-map)]
+              (if (validator error-data)
+                (throw caught-exception)
+                (let [explain (m/explain (:schema matching-def) error-data)]
+                  (throw (ex-info (str "Invalid exception thrown from method '"
+                                       (name method-sym)
+                                       "' of "
+                                       qualified-protocol-sym)
+                                  {:type :malt/invalid-exception-error
+                                   :protocol qualified-protocol-sym
+                                   :method method-sym
+                                   :data error-data
+                                   :errors (me/humanize explain)}
+                                  caught-exception)))))
+            (throw caught-exception)))))
+    (throw (ex-info (str "Unspecified exception thrown from method '"
+                         (name method-sym)
+                         "' of "
+                         qualified-protocol-sym)
+                    {:type :malt/unspecified-exception-error
+                     :protocol qualified-protocol-sym
+                     :method method-sym}
+                    caught-exception))))
+
 (defn- normalize-method-impl
   [protocol-sym method-form]
   (when-not (seq? method-form)
@@ -440,7 +517,7 @@
                           :method (list 'quote method-sym)}]
         (list method-sym
               (into [this-sym] params-syms)
-              `(let [[~args-schema-sym ~args-validator-sym ~return-schema-sym ~return-validator-sym ~input-param-syms-sym]
+              `(let [[~args-schema-sym ~args-validator-sym ~return-schema-sym ~return-validator-sym ~input-param-syms-sym throws-defs# exception-validators#]
                      (schema-vars-for-method '~qualified-protocol-sym '~method-sym)
                      ~ex-data-base-sym ~ex-data-base]
                  (when ~args-validator-sym
@@ -450,18 +527,26 @@
                                      [~@params-syms]
                                      ~ex-data-base-sym))
                  (let [~@destructure-bindings]
-                   (let [~result-sym (do ~@body)]
-                     (validate! ~return-schema-sym
-                                ~result-sym
-                                (assoc ~ex-data-base-sym
-                                       :phase :output
-                                       :type :malt/output-validation-failed
-                                       :validator ~return-validator-sym
-                                       :message ~(str "Invalid return value from '"
-                                                      (name method-sym)
-                                                      "' of "
-                                                      qualified-protocol-sym)))
-                     ~result-sym))))))))
+                   (try
+                     (let [~result-sym (do ~@body)]
+                       (validate! ~return-schema-sym
+                                  ~result-sym
+                                  (assoc ~ex-data-base-sym
+                                         :phase :output
+                                         :type :malt/output-validation-failed
+                                         :validator ~return-validator-sym
+                                         :message ~(str "Invalid return value from '"
+                                                        (name method-sym)
+                                                        "' of "
+                                                        qualified-protocol-sym)))
+                       ~result-sym)
+                     (catch Exception ex#
+                       (if throws-defs#
+                         (check-throws! ex# throws-defs# exception-validators#
+                                        '~qualified-protocol-sym '~method-sym)
+                          (throw ex#)))))))))))
+
+
 
 (defn- normalize-extend-type-sym
   [type-sym]

@@ -98,3 +98,36 @@
     (no-args [_] "")))
 
 (no-args with-no-args)
+
+;; Checked exceptions
+(def not_found
+  {:code :not_found
+   :schema [:map [:id :string]]
+   :message "Resource not found"
+   :metadata {:http/status-code 404}})
+
+(def conflict
+  {:code :conflict
+   :message "Resource conflict"
+   :schema [:map [:resource :string]]})
+
+(malt/defprotocol CheckedExample
+  (find-resource! [id :string]
+    :nil
+    (throws [not_found]))
+
+  (create-resource! [data :any]
+    :nil
+    (throws [not_found conflict])))
+
+(find-resource!
+ (reify CheckedExample
+   (find-resource! [_ _] nil)
+   (create-resource! [_ _] nil))
+ "abc")
+
+(create-resource!
+ (reify CheckedExample
+   (find-resource! [_ _] nil)
+   (create-resource! [_ _] nil))
+ {})

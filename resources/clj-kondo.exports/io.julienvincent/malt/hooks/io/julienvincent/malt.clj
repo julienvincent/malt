@@ -17,6 +17,15 @@
        :param-nodes []
        :schema-nodes []})))
 
+(defn- list-node? [node]
+  (= :list (:tag node)))
+
+(defn- throws-node? [node]
+  (and (list-node? node)
+       (let [children (:children node)]
+         (and (seq children)
+              (= 'throws (api/sexpr (first children)))))))
+
 (defn- normalize-method [method-node]
   (let [[method-name & rest-children] (:children method-node)
         [doc-node rest-children] (if (and (seq rest-children)
@@ -27,6 +36,10 @@
                                            (map? (api/sexpr (first rest-children))))
                                     [(first rest-children) (rest rest-children)]
                                     [nil rest-children])
+        [rest-children throws-node] (if (and (>= (count rest-children) 3)
+                                             (throws-node? (last rest-children)))
+                                      [(butlast rest-children) (last rest-children)]
+                                      [rest-children nil])
         schema-form? (and (= 2 (count rest-children))
                           (vector-node? (first rest-children)))
         method-children (if schema-form?
@@ -99,14 +112,24 @@
                                                  [_attr method-rest] (if (and (seq method-rest)
                                                                               (map? (api/sexpr (first method-rest))))
                                                                        [(first method-rest) (rest method-rest)]
-                                                                       [nil method-rest])]
-                                             (when (= 2 (count method-rest))
-                                               (let [[input-schemas-node output-schema-node] method-rest]
-                                                 (when (vector-node? input-schemas-node)
-                                                   (let [{:keys [pair-form? schema-nodes]} (parse-input-schemas-node
-                                                                                            input-schemas-node)]
-                                                     (when pair-form?
-                                                       (concat schema-nodes [output-schema-node])))))))))
+                                                                       [nil method-rest])
+                                                 [method-rest throws-node] (if (and (>= (count method-rest) 3)
+                                                                                    (throws-node? (last method-rest)))
+                                                                             [(butlast method-rest) (last method-rest)]
+                                                                             [method-rest nil])
+                                                 throws-ref-nodes (when throws-node
+                                                                    (let [throws-vec (second (:children throws-node))]
+                                                                      (when (vector-node? throws-vec)
+                                                                        (:children throws-vec))))]
+                                             (concat
+                                              (when (= 2 (count method-rest))
+                                                (let [[input-schemas-node output-schema-node] method-rest]
+                                                  (when (vector-node? input-schemas-node)
+                                                    (let [{:keys [pair-form? schema-nodes]} (parse-input-schemas-node
+                                                                                             input-schemas-node)]
+                                                      (when pair-form?
+                                                        (concat schema-nodes [output-schema-node]))))))
+                                              throws-ref-nodes))))
                                  (remove nil?))
         methods (mapv normalize-method rest-children)
         defprotocol-node (api/list-node (concat (cond-> [(api/token-node 'defprotocol)
