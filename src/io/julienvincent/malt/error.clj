@@ -4,6 +4,10 @@
    [malli.error :as me]))
 
 (def ?ErrorDefinition
+  "A malli schema representing the format for a malt error definition.
+
+   Can be referenced directly if you want to validate definitions, or you can
+   use the provided [validate-definition!] fn."
   [:map {:closed true}
    [:code :keyword]
    [:message {:optional true} :string]
