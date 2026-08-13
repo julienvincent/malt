@@ -8,6 +8,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
     - name: Checkout git repo
       uses: actions/checkout@v4
@@ -39,3 +41,13 @@ jobs:
         CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
       if: ${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
       run: just release
+
+    - name: Create GitHub Release
+      if: ${{ github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        ./build/generate-changelog.sh "${{ github.sha }}" > /tmp/changelog.md
+        gh release create "${{ github.ref_name }}" --verify-tag \
+          --title "${{ github.ref_name }}" \
+          --notes-file /tmp/changelog.md
