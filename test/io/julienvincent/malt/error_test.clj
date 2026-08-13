@@ -73,6 +73,56 @@
              (ex-data exception)))
       (is (identical? cause (ex-cause exception))))))
 
+(deftest ex-three-arity-test
+  (testing "creates exception with message and data"
+    (let [exception (error/ex :not_found "Not found" {:id "abc"})]
+      (is (= "Not found" (ex-message exception)))
+      (is (= {:type :malt/error
+              :code :not_found
+              :data {:id "abc"}}
+             (ex-data exception)))
+      (is (nil? (ex-cause exception)))))
+
+  (testing "creates exception with message and cause"
+    (let [cause (Exception. "root cause")
+          exception (error/ex :not_found "Not found" cause)]
+      (is (= "Not found" (ex-message exception)))
+      (is (= {:type :malt/error
+              :code :not_found
+              :data {}}
+             (ex-data exception)))
+      (is (identical? cause (ex-cause exception)))))
+
+  (testing "creates exception with data and cause, message from definition"
+    (let [cause (Exception. "root cause")
+          definition {:code :not_found
+                      :message "Resource not found"}
+          exception (error/ex definition {:id "abc"} cause)]
+      (is (= "Resource not found" (ex-message exception)))
+      (is (= {:type :malt/error
+              :code :not_found
+              :data {:id "abc"}}
+             (ex-data exception)))
+      (is (identical? cause (ex-cause exception)))))
+
+  (testing "throws when second arg is neither string nor map"
+    (is (thrown? IllegalArgumentException
+                 (error/ex :not_found 123 {}))))
+
+  (testing "throws when third arg is neither map nor Throwable"
+    (is (thrown? IllegalArgumentException
+                 (error/ex :not_found "Not found" 123))))
+
+  (testing "throws when data is provided twice"
+    (is (thrown? IllegalArgumentException
+                 (error/ex :not_found {:id "abc"} {:id "def"}))))
+
+  (testing "throws when data and cause provided but no message available"
+    (is (thrown? IllegalArgumentException
+                 (error/ex :not_found {:id "abc"} (Exception. "cause"))))
+    (is (thrown? IllegalArgumentException
+                 (error/ex {:code :not_found} {:id "abc"} (Exception. "cause"))))))
+
 (deftest ex-error-cases-test
   (testing "throws when definition has no :message and none provided"
     (is (thrown? IllegalArgumentException
