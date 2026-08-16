@@ -47,7 +47,10 @@
 
   (do-qux! [action :keyword]
     :nil
-    (throws [strict_error])))
+    (throws [strict_error]))
+
+  (do-strict! [action :keyword]
+    :nil))
 
 (malt/defrecord Api
   []
@@ -85,7 +88,13 @@
     (case action
       :valid (throw (ex-info "Custom failure" {:reason "broken"}))
       :invalid (throw (ex-info "Custom failure" {:reason 123}))
-      :plain (throw (RuntimeException. "Plain failure")))))
+      :plain (throw (RuntimeException. "Plain failure"))))
+
+  (do-strict! [_ action]
+    (case action
+      :plain (throw (ex-info "Boom" {:some "data"}))
+      :malt (malt.error/throw! :fault "Fault")
+      :ok nil)))
 
 (deftest checked-protocol-metadata-test
   (let [proto-data (into {} CheckedExceptions)]
@@ -180,6 +189,38 @@
                   :code :fault
                   :data {}}
                  (ex-data cause))))))))
+
+(deftest no-throws-clause-test
+  (let [api (->Api)]
+    (testing "methods without a throws clause are expected not to throw"
+      (is (exception? clojure.lang.ExceptionInfo
+                      "Unspecified exception thrown from method 'do-strict!' of io.julienvincent.malt.checked-protocol-test/CheckedExceptions"
+                      (matchers/equals
+                       {:type :malt/unspecified-exception-error
+                        :protocol 'io.julienvincent.malt.checked-protocol-test/CheckedExceptions
+                        :method 'do-strict!})
+                      (do-strict! api :plain)))
+
+      (is (exception? clojure.lang.ExceptionInfo
+                      "Unspecified exception thrown from method 'do-strict!' of io.julienvincent.malt.checked-protocol-test/CheckedExceptions"
+                      (matchers/equals
+                       {:type :malt/unspecified-exception-error
+                        :protocol 'io.julienvincent.malt.checked-protocol-test/CheckedExceptions
+                        :method 'do-strict!})
+                      (do-strict! api :malt))))
+
+    (testing "the original exception is preserved as the cause"
+      (try
+        (do-strict! api :plain)
+        (is false "Expected exception to be thrown")
+        (catch clojure.lang.ExceptionInfo ex
+          (let [cause (ex-cause ex)]
+            (is (instance? clojure.lang.ExceptionInfo cause))
+            (is (= "Boom" (ex-message cause)))
+            (is (= {:some "data"} (ex-data cause)))))))
+
+    (testing "returning normally passes"
+      (is (nil? (do-strict! api :ok))))))
 
 (deftest class-throws-test
   (let [api (->Api)]

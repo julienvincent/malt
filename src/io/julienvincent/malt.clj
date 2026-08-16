@@ -12,14 +12,16 @@
    This is the core malt API entrypoint.
 
    Method specs take param/schema pairs followed by a return schema and an
-   optional `(throws [...])` clause for checked exceptions:
+   optional `(throws [...])` clause for checked exceptions.
+
+   Methods without a `throws` clause are expected not to throw.
 
    ```clojure
    (defprotocol UserStore
      (create-user [name :string age :int] :string)
      (suspend-user! [id :string]
        :nil
-       (throws [not-found])))
+       (throws [not-found Exception])))
    ```
 
    All provided data is made available on the produced protocol var and can be

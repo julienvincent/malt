@@ -100,7 +100,7 @@ validators and makes the contract visible to tools and humans.
 
 - Accepts param/schema pairs in the method vector, followed by the return schema.
 - Optionally accepts a `(throws [...])` clause after the return schema to declare checked exceptions - see
-  [Checked exceptions](#checked-exceptions).
+  [Checked exceptions](#checked-exceptions). Methods without a `throws` clause are expected not to throw.
 - Produces a normal Clojure protocol plus a `?ProtocolName` Malli schema var.
 
 ```clojure
@@ -328,7 +328,7 @@ exception definitions.
 
 (def custom-conflict
   {:class clojure.lang.ExceptionInfo
-   :schema [:map 
+   :schema [:map
             [:type [:= :conflict]]]
    :metadata {:http/status-code 409}})
 
@@ -368,8 +368,10 @@ arities:
 
 #### Runtime semantics
 
-When a method declaring a `throws` clause is implemented via `malt/reify`, `malt/extend-type`, or inline in a
-`malt/defrecord`, exceptions escaping the method body are checked against the declared definitions.
+When a method of a malt protocol is implemented via `malt/reify`, `malt/extend-type`, or inline in a `malt/defrecord`,
+exceptions escaping the method body are checked against the definitions declared in the method's `throws` clause. A
+method without a `throws` clause is expected not to throw - any exception escaping it is wrapped in a
+`:malt/unspecified-exception-error`.
 
 Malt errors are matched exclusively against the declared error definitions, and any other exception is matched
 exclusively against the declared exception classes:
@@ -385,8 +387,7 @@ exclusively against the declared exception classes:
 Note that declaring a class never weakens malt error contracts - a malt error is only considered declared when its
 `:code` matches an error definition, even when a broad class like `java.lang.Exception` is declared.
 
-The original exception is always preserved as the `ex-cause` of the wrapping exception. Methods without a `throws`
-clause are unaffected and exceptions pass through unchanged.
+The original exception is always preserved as the `ex-cause` of the wrapping exception.
 
 #### Errors are part of the spec
 
@@ -479,8 +480,8 @@ Record constructor validation failed.
 
 #### `:malt/unspecified-exception-error`
 
-A method declaring a `throws` clause threw an exception that was not declared. The original exception is attached as the
-`ex-cause`.
+A method threw an exception that was not declared in its `throws` clause - or the method does not declare a `throws`
+clause at all. The original exception is attached as the `ex-cause`.
 
 ```clojure
 (ex-info

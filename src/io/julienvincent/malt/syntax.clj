@@ -131,7 +131,8 @@
 
    Only exceptions thrown by the implementation body are subject to checked
    exception handling - validation errors raised by malt itself always propagate
-   unchanged.
+   unchanged. Methods without a `(throws [...])` clause are expected not to
+   throw at all.
 
    The generated body obtains the enriched method signature from the protocol
    var - referenced directly, resolved at compile time - so a call only pays for
@@ -182,13 +183,11 @@
                      (let [result# (try
                                      (do ~@body)
                                      (catch Exception ex#
-                                       (if-let [throws-defs# (:malt/throws sig#)]
-                                         (malt.runtime/check-throws! ex#
-                                                                     throws-defs#
-                                                                     (:malt/exception-validators sig#)
-                                                                     '~qualified-protocol-sym
-                                                                     '~method-sym)
-                                         (throw ex#))))]
+                                       (malt.runtime/check-throws! ex#
+                                                                   (:malt/throws sig#)
+                                                                   (:malt/exception-validators sig#)
+                                                                   '~qualified-protocol-sym
+                                                                   '~method-sym)))]
                        (malt.runtime/validate-value!
                         (:malt/return-schema sig#)
                         (:malt/return-validator sig#)

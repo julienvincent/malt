@@ -160,15 +160,17 @@
                         (= :output phase) (assoc :output value)))))))
 
 (defn check-throws!
-  "Handles an exception escaping a protocol method that declares a
-   `(throws [...])` clause.
+  "Handles an exception escaping the implementation body of a protocol method.
 
    Malt errors are matched exclusively against the declared error definitions by
    `:code`; any other exception is matched exclusively against the declared
    exception classes with `instance?`. Rethrows the exception unchanged when it
    matches a declaration (and its data validates against the definition's
    `:schema`, when present), otherwise wraps it in an ExceptionInfo describing
-   the contract violation."
+   the contract violation.
+
+   Methods without a `(throws [...])` clause are expected not to throw at all -
+   `throws-defs` is empty and every exception is wrapped as unspecified."
   [caught throws-defs exception-validators protocol-sym method-sym]
   (let [data (when (instance? clojure.lang.IExceptionInfo caught)
                (ex-data caught))
