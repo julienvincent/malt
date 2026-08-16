@@ -278,19 +278,36 @@ boundary.
 ---
 
 Protocol methods can declare the errors they are expected to throw using a `(throws [...])` clause placed after the
-return schema. Each symbol in the vector must resolve to a var holding an error definition map matching
-`io.julienvincent.malt.error/?ErrorDefinition`:
+return schema. Each entry in the vector must be one of:
 
-```clojure
-[:map {:closed true}
- [:code :keyword]
- [:message {:optional true} :string]
- [:schema {:optional true} :any]
- [:metadata {:optional true} :map]]
-```
+- A symbol resolving to a var holding a **malt error definition** map matching
+  `io.julienvincent.malt.error/?ErrorDefinition`. These declare malt errors, which are matched by their `:code`:
+
+  ```clojure
+  [:map {:closed true}
+   [:code :keyword]
+   [:message {:optional true} :string]
+   [:schema {:optional true} :any]
+   [:metadata {:optional true} :map]]
+  ```
+
+- A symbol resolving to a **class** extending `java.lang.Throwable` - for example `java.io.IOException`. These declare
+  non-malt exceptions, which are matched with `instance?` (subclasses included).
+
+- A symbol resolving to a var holding an **exception definition** map matching
+  `io.julienvincent.malt.error/?ExceptionDefinition`. Equivalent to declaring a bare class, but additionally allows
+  attaching a `:schema` and `:metadata` to the declaration:
+
+  ```clojure
+  [:map {:closed true}
+   [:class <class extending java.lang.Throwable>]
+   [:schema {:optional true} :any]
+   [:metadata {:optional true} :map]]
+  ```
 
 Definitions are resolved and validated when the protocol is defined. Invalid definitions throw a
-`:malt/invalid-definition` error at definition (compile) time.
+`:malt/invalid-definition` error at definition (compile) time. Bare classes are normalized to `{:class <class>}`
+exception definitions.
 
 <!-- pruner-ignore -->
 
@@ -304,10 +321,14 @@ Definitions are resolved and validated when the protocol is defined. Invalid def
             [:id :string]]
    :metadata {:http/status-code 404}})
 
+(def timeout
+  {:class java.util.concurrent.TimeoutException
+   :metadata {:http/status-code 504}})
+
 (malt/defprotocol Resources
   (fetch! [id :string]
     ?Resource
-    (throws [not-found])))
+    (throws [not-found timeout java.io.IOException])))
 
 (malt/defrecord ResourceStore
   [db ?DataSource]
@@ -333,13 +354,21 @@ arities:
 #### Runtime semantics
 
 When a method declaring a `throws` clause is implemented via `malt/reify`, `malt/extend-type`, or inline in a
-`malt/defrecord`, exceptions escaping the method body are checked against the declared definitions:
+`malt/defrecord`, exceptions escaping the method body are checked against the declared definitions.
+
+Malt errors are matched exclusively against the declared error definitions, and any other exception is matched
+exclusively against the declared exception classes:
 
 - A malt error whose `:code` matches a declared definition, and whose `:data` validates against the definition's
   `:schema` (when present), is re-thrown unchanged.
 - A malt error matching a declared definition but with invalid `:data` is wrapped in a `:malt/invalid-exception-error`.
-- Any other exception - including malt errors with undeclared codes and plain Java exceptions - is wrapped in an
+- Any other exception that is an `instance?` of a declared class, and whose `ex-data` validates against the
+  definition's `:schema` (when present), is re-thrown unchanged.
+- Everything else - malt errors with undeclared codes and exceptions of undeclared classes - is wrapped in an
   `:malt/unspecified-exception-error`.
+
+Note that declaring a class never weakens malt error contracts - a malt error is only considered declared when its
+`:code` matches an error definition, even when a broad class like `java.lang.Exception` is declared.
 
 The original exception is always preserved as the `ex-cause` of the wrapping exception. Methods without a `throws`
 clause are unaffected and exceptions pass through unchanged.
@@ -350,8 +379,8 @@ The error and their full definitions are exposed on the underlying protocol var 
 This data can and should be used by external tools to generate clients, openapi schemas, or things like HTTP endpoint
 definitions.
 
-Error definitions have a dedicated `:metadata` map which is there for you to store whatever additional data you want.
-This metadata is designed to be consumed by generators.
+Both error and exception definitions have a dedicated `:metadata` map which is there for you to store whatever
+additional data you want. This metadata is designed to be consumed by generators.
 
 For example, you could define your error definitions as follows:
 
@@ -448,8 +477,8 @@ A method declaring a `throws` clause threw an exception that was not declared. T
 
 #### `:malt/invalid-exception-error`
 
-A declared error was thrown but its `:data` did not match the definition's `:schema`. The original exception is attached
-as the `ex-cause`.
+A declared error was thrown but its data did not match the definition's `:schema` - the `:data` of a malt error, or
+the `ex-data` of an exception matched by class. The original exception is attached as the `ex-cause`.
 
 ```clojure
 (ex-info
@@ -463,15 +492,17 @@ as the `ex-cause`.
 
 #### `:malt/invalid-definition`
 
-An error definition referenced from a `throws` clause did not match `?ErrorDefinition`. This is thrown at protocol
-definition time.
+A definition referenced from a `throws` clause did not match `?ErrorDefinition` or `?ExceptionDefinition`. This is
+thrown at protocol definition time.
 
 ```clojure
 (ex-info
- "Invalid error definition"
+ "Invalid throws definition"
  {:type :malt/invalid-definition
   :definition {:message "Foo"}
-  :errors {:code ["missing required key"]}})
+  :errors {:code ["missing required key"]
+           :class ["missing required key"]
+           :message ["disallowed key"]}})
 ```
 
 ## Formatting

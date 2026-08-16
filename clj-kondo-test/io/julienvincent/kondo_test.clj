@@ -111,14 +111,18 @@
    :message "Resource conflict"
    :schema [:map [:resource :string]]})
 
+(def timeout
+  {:class java.util.concurrent.TimeoutException
+   :metadata {:http/status-code 504}})
+
 (malt/defprotocol CheckedExample
   (find-resource! [id :string]
     :nil
-    (throws [not_found]))
+    (throws [not_found java.io.IOException]))
 
   (create-resource! [data :any]
     :nil
-    (throws [not_found conflict])))
+    (throws [not_found conflict timeout Exception])))
 
 (find-resource!
  (reify CheckedExample

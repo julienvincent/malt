@@ -8,15 +8,39 @@
    [malli.core :as m]
    [malli.error :as me]))
 
+(def ^:private ?ThrowsDefinition
+  [:or
+   malt.error/?ErrorDefinition
+   malt.error/?ExceptionDefinition])
+
+(def ^:private throws-definition-validator
+  (delay (m/validator ?ThrowsDefinition)))
+
+(defn- validate-throws-definition!
+  [definition]
+  (when-not (@throws-definition-validator definition)
+    (let [explain (m/explain ?ThrowsDefinition definition)]
+      (throw (ex-info "Invalid throws definition"
+                      {:type :malt/invalid-definition
+                       :definition definition
+                       :errors (me/humanize explain)}))))
+  definition)
+
 (defn- resolve-throws-definitions
   [protocol-ns throws-syms]
   (mapv (fn [throws-sym]
-          (let [resolved-var (ns-resolve protocol-ns throws-sym)]
-            (when-not (var? resolved-var)
-              (throw (IllegalArgumentException.
-                      (str "throws symbol '" throws-sym
-                           "' must resolve to a var"))))
-            (malt.error/validate-definition! @resolved-var)))
+          (let [resolved (ns-resolve protocol-ns throws-sym)
+                value (cond
+                        (var? resolved) @resolved
+                        (class? resolved) resolved
+                        :else
+                        (throw (IllegalArgumentException.
+                                (str "throws symbol '" throws-sym
+                                     "' must resolve to a var or a class"))))]
+            (validate-throws-definition!
+             (if (class? value)
+               {:class value}
+               value))))
         throws-syms))
 
 (defn- enrich-sig
@@ -49,9 +73,9 @@
       (assoc :malt/throws throws
              :malt/exception-validators
              (into {}
-                   (keep (fn [{:keys [code schema]}]
+                   (keep (fn [{:keys [code schema] klass :class}]
                            (when schema
-                             [code (m/validator schema)])))
+                             [(or code klass) (m/validator schema)])))
                    throws)))))
 
 (defn enrich-protocol-var!
@@ -137,21 +161,36 @@
 
 (defn check-throws!
   "Handles an exception escaping a protocol method that declares a
-   `(throws [...])` clause. Rethrows the exception unchanged when it is a malt
-   error matching a declared definition (and its data is valid), otherwise wraps
-   it in an ExceptionInfo describing the contract violation."
+   `(throws [...])` clause.
+
+   Malt errors are matched exclusively against the declared error definitions by
+   `:code`; any other exception is matched exclusively against the declared
+   exception classes with `instance?`. Rethrows the exception unchanged when it
+   matches a declaration (and its data validates against the definition's
+   `:schema`, when present), otherwise wraps it in an ExceptionInfo describing
+   the contract violation."
   [caught throws-defs exception-validators protocol-sym method-sym]
   (let [data (when (instance? clojure.lang.IExceptionInfo caught)
                (ex-data caught))
-        code (when (= :malt/error (:type data))
-               (:code data))
-        matching-def (when code
+        malt-error? (= :malt/error (:type data))
+        matching-def (if malt-error?
                        (some (fn [definition]
-                               (when (= code (:code definition))
+                               (when (and (:code definition)
+                                          (= (:code data) (:code definition)))
                                  definition))
+                             throws-defs)
+                       (some (fn [definition]
+                               (when-let [klass (:class definition)]
+                                 (when (instance? klass caught)
+                                   definition)))
                              throws-defs))
+        error-data (if malt-error?
+                     (:data data)
+                     data)
         validator (when matching-def
-                    (get exception-validators code))]
+                    (get exception-validators
+                         (or (:code matching-def)
+                             (:class matching-def))))]
     (cond
       (nil? matching-def)
       (throw (ex-info (str "Unspecified exception thrown from method '"
@@ -162,16 +201,16 @@
                       caught))
 
       (or (nil? validator)
-          (validator (:data data)))
+          (validator error-data))
       (throw caught)
 
       :else
-      (let [errors (me/humanize (m/explain (:schema matching-def) (:data data)))]
+      (let [errors (me/humanize (m/explain (:schema matching-def) error-data))]
         (throw (ex-info (str "Invalid exception thrown from method '"
                              (name method-sym) "' of " protocol-sym)
                         {:type :malt/invalid-exception-error
                          :protocol protocol-sym
                          :method method-sym
-                         :data (:data data)
+                         :data error-data
                          :errors errors}
                         caught))))))

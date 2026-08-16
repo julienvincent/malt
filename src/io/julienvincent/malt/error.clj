@@ -14,6 +14,17 @@
    [:schema {:optional true} :any]
    [:metadata {:optional true} :map]])
 
+(def ?ExceptionDefinition
+  "A malli schema representing the format for a malt exception definition - used
+   to declare non-malt exception classes in a `(throws [...])` clause."
+  [:map {:closed true}
+   [:class [:fn {:error/message "should be a class extending java.lang.Throwable"}
+            (fn [klass]
+              (and (class? klass)
+                   (isa? klass Throwable)))]]
+   [:schema {:optional true} :any]
+   [:metadata {:optional true} :map]])
+
 (def ^:private definition-validator
   (delay (m/validator ?ErrorDefinition)))
 

@@ -56,7 +56,7 @@
                        (vector? (second throws-form)))
           (throw (IllegalArgumentException.
                   (str "throws clause must be of the form "
-                       "(throws [def1 def2 ...]) for "
+                       "(throws [definition-or-class ...]) for "
                        protocol-sym "/" method-sym "; got "
                        (pr-str throws-form))))))
       (when-not (vector? input-schemas)
