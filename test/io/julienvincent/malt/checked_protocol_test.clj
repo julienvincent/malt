@@ -53,11 +53,18 @@
   []
   CheckedExceptions
   (find! [_ id]
-    (when (= "" id)
-      (throw (java.lang.IllegalArgumentException. "String too short")))
-    (when (= "checked" id)
-      (malt.error/throw! not_found {:id id}))
-    (malt.error/throw! :fault "Fault"))
+    (cond
+      (= id "")
+      (throw (java.lang.IllegalArgumentException. "String too short"))
+
+      (= "checked" id)
+      (malt.error/throw! not_found {:id id})
+
+      (= "bad-output" id)
+      123
+
+      :else
+      (malt.error/throw! :fault "Fault")))
 
   (do-foo! [_ data]
     (malt.error/throw! conflict data))
@@ -113,6 +120,23 @@
                       :code :not_found
                       :data {:id "checked"}})
                     (find! api "checked")))))
+
+(deftest unchecked-validation-errors-test
+  (testing "Malt validation errors should not be checked"
+    (let [api (->Api)]
+      (is (exception? clojure.lang.ExceptionInfo
+                      #"Invalid parameter 'id' passed to 'find!'"
+                      {:type :malt/input-validation-failed
+                       :errors [["should be a string"]]
+                       :input [1]}
+                      (find! api 1)))
+
+      (is (exception? clojure.lang.ExceptionInfo
+                      #"Invalid return value from 'find!'"
+                      {:type :malt/output-validation-failed
+                       :output 123
+                       :errors ["should be nil"]}
+                      (find! api "bad-output"))))))
 
 (deftest unchecked-error-test
   (let [api (->Api)]

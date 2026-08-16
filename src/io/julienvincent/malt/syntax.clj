@@ -129,6 +129,10 @@
   "Wraps a protocol method implementation with input/output validation and
    checked exception handling.
 
+   Only exceptions thrown by the implementation body are subject to checked
+   exception handling - validation errors raised by malt itself always propagate
+   unchanged.
+
    The generated body obtains the enriched method signature from the protocol
    var - referenced directly, resolved at compile time - so a call only pays for
    a deref, the signature lookup and the precompiled validators."
@@ -175,29 +179,29 @@
                                                     {:protocol '~qualified-protocol-sym
                                                      :method '~method-sym}))
                    (let [~@destructure-bindings]
-                     (try
-                       (let [result# (do ~@body)]
-                         (malt.runtime/validate-value!
-                          (:malt/return-schema sig#)
-                          (:malt/return-validator sig#)
-                          result#
-                          {:type :malt/output-validation-failed
-                           :phase :output
-                           :message ~(str "Invalid return value from '"
-                                          (name method-sym)
-                                          "' of "
-                                          qualified-protocol-sym)
-                           :data {:protocol '~qualified-protocol-sym
-                                  :method '~method-sym}})
-                         result#)
-                       (catch Exception ex#
-                         (if-let [throws-defs# (:malt/throws sig#)]
-                           (malt.runtime/check-throws! ex#
-                                                       throws-defs#
-                                                       (:malt/exception-validators sig#)
-                                                       '~qualified-protocol-sym
-                                                       '~method-sym)
-                           (throw ex#))))))))))))
+                     (let [result# (try
+                                     (do ~@body)
+                                     (catch Exception ex#
+                                       (if-let [throws-defs# (:malt/throws sig#)]
+                                         (malt.runtime/check-throws! ex#
+                                                                     throws-defs#
+                                                                     (:malt/exception-validators sig#)
+                                                                     '~qualified-protocol-sym
+                                                                     '~method-sym)
+                                         (throw ex#))))]
+                       (malt.runtime/validate-value!
+                        (:malt/return-schema sig#)
+                        (:malt/return-validator sig#)
+                        result#
+                        {:type :malt/output-validation-failed
+                         :phase :output
+                         :message ~(str "Invalid return value from '"
+                                        (name method-sym)
+                                        "' of "
+                                        qualified-protocol-sym)
+                         :data {:protocol '~qualified-protocol-sym
+                                :method '~method-sym}})
+                       result#)))))))))
 
 (defn wrap-method-impls
   "Given grouped [protocol-sym methods] pairs, returns the flat seq of protocol
