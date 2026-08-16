@@ -281,7 +281,8 @@ Protocol methods can declare the errors they are expected to throw using a `(thr
 return schema. Each entry in the vector must be one of:
 
 - A symbol resolving to a var holding a **malt error definition** map matching
-  `io.julienvincent.malt.error/?ErrorDefinition`. These declare malt errors, which are matched by their `:code`:
+  `io.julienvincent.malt.error/?ErrorDefinition`. These declare malt errors, which are matched by their `:code` and can
+  be constructed by calling `malt.error/ex` or thrown by calling `malt.error/throw!`:
 
   ```clojure
   [:map {:closed true}
@@ -292,7 +293,7 @@ return schema. Each entry in the vector must be one of:
   ```
 
 - A symbol resolving to a **class** extending `java.lang.Throwable` - for example `java.io.IOException`. These declare
-  non-malt exceptions, which are matched with `instance?` (subclasses included).
+  non-malt exceptions, which are matched with `instance?`.
 
 - A symbol resolving to a var holding an **exception definition** map matching
   `io.julienvincent.malt.error/?ExceptionDefinition`. Equivalent to declaring a bare class, but additionally allows
@@ -325,10 +326,20 @@ exception definitions.
   {:class java.util.concurrent.TimeoutException
    :metadata {:http/status-code 504}})
 
+(def custom-conflict
+  {:class clojure.lang.ExceptionInfo
+   :schema [:map 
+            [:type [:= :conflict]]]
+   :metadata {:http/status-code 409}})
+
 (malt/defprotocol Resources
   (fetch! [id :string]
     ?Resource
-    (throws [not-found timeout java.io.IOException])))
+    (throws [not-found timeout java.io.IOException]))
+
+  (do-foo! [id :string]
+    ?Resource
+    (throws [custom-conflict])))
 
 (malt/defrecord ResourceStore
   [db ?DataSource]
@@ -336,10 +347,14 @@ exception definitions.
   Resources
   (fetch! [_ id]
     (or (lookup db id)
-        (malt.error/throw! not-found {:id id}))))
+        (malt.error/throw! not-found {:id id})))
+
+  (do-foo! [_ id]
+    (or (do-foo! db id)
+        (throw (ex-info "Resource conflict" {:type :conflict})))))
 ```
 
-#### Constructing errors
+#### Constructing malt errors
 
 Malt errors are `ExceptionInfo` instances with `{:type :malt/error :code <code> :data <map>}` as `ex-data`. Use
 `malt.error/ex` to construct one, or `malt.error/throw!` to construct and throw in one step. Both accept the same
@@ -362,8 +377,8 @@ exclusively against the declared exception classes:
 - A malt error whose `:code` matches a declared definition, and whose `:data` validates against the definition's
   `:schema` (when present), is re-thrown unchanged.
 - A malt error matching a declared definition but with invalid `:data` is wrapped in a `:malt/invalid-exception-error`.
-- Any other exception that is an `instance?` of a declared class, and whose `ex-data` validates against the
-  definition's `:schema` (when present), is re-thrown unchanged.
+- Any other exception that is an `instance?` of a declared class, and whose `ex-data` validates against the definition's
+  `:schema` (when present), is re-thrown unchanged.
 - Everything else - malt errors with undeclared codes and exceptions of undeclared classes - is wrapped in an
   `:malt/unspecified-exception-error`.
 
@@ -477,8 +492,8 @@ A method declaring a `throws` clause threw an exception that was not declared. T
 
 #### `:malt/invalid-exception-error`
 
-A declared error was thrown but its data did not match the definition's `:schema` - the `:data` of a malt error, or
-the `ex-data` of an exception matched by class. The original exception is attached as the `ex-cause`.
+A declared error was thrown but its data did not match the definition's `:schema` - the `:data` of a malt error, or the
+`ex-data` of an exception matched by class. The original exception is attached as the `ex-cause`.
 
 ```clojure
 (ex-info
