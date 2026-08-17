@@ -37,8 +37,10 @@
        :schemas schemas})))
 
 (defn normalize-protocol-method
-  "Normalizes a malt method spec into a clojure.core/defprotocol method form,
-   attaching the authored schemas as :malt/\\* metadata on the method name."
+  "Normalizes a malt method spec, returning
+   `{:method-kw <keyword> :spec <map> :form <method-form>}` where `:form` is a
+   plain clojure.core/defprotocol method form and `:spec` holds the authored
+   :malt/\\* schema data."
   [protocol-sym method-spec]
   (let [[method-sym & method-forms] method-spec
         {:keys [doc attrs forms]} (take-doc+attrs method-forms)]
@@ -78,25 +80,27 @@
                        (pr-str input-schemas)))))
         (let [throws-syms (when throws-form
                             (second throws-form))
-              schema-meta (cond-> {:malt/params params
-                                   :malt/arguments-schema (when (seq params)
-                                                            (into [:cat] schemas))
-                                   :malt/return-schema output-schema}
-                            (seq params)
-                            (assoc :malt/param-schemas
-                                   (zipmap (mapv (comp keyword name) params)
-                                           schemas))
+              spec (cond-> {:malt/params params
+                            :malt/arguments-schema (when (seq params)
+                                                     (into [:cat] schemas))
+                            :malt/return-schema output-schema}
+                     (seq params)
+                     (assoc :malt/param-schemas
+                            (zipmap (mapv (comp keyword name) params)
+                                    schemas))
 
-                            throws-syms
-                            (assoc :malt/throws (vec throws-syms)))
-              method-meta (cond-> (merge (meta method-sym) schema-meta)
+                     throws-syms
+                     (assoc :malt/throws (vec throws-syms)))
+              method-meta (cond-> (meta method-sym)
                             doc (assoc :doc doc)
                             attrs (merge attrs))]
-          (list* (with-meta method-sym method-meta)
-                 (into ['this] params)
-                 (cond-> []
-                   doc (conj doc)
-                   attrs (conj attrs))))))))
+          {:method-kw (keyword (name method-sym))
+           :spec spec
+           :form (list* (with-meta method-sym method-meta)
+                        (into ['this] params)
+                        (cond-> []
+                          doc (conj doc)
+                          attrs (conj attrs)))})))))
 
 (defn group-implementations
   "Groups a flat seq of protocol symbols and method forms - as accepted by

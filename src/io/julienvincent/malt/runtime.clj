@@ -78,18 +78,39 @@
                              [(or code klass) (m/validator schema)])))
                    throws)))))
 
+(def ^:private var-meta-keys
+  [:malt/params
+   :malt/param-schemas
+   :malt/arguments-schema
+   :malt/return-schema
+   :malt/throws])
+
 (defn enrich-protocol-var!
-  "Marks `protocol-var` as a malt protocol and enriches every method signature
-   with resolved schemas and precompiled validators. Called once as part of a
-   `malt/defprotocol` definition."
-  [protocol-var]
+  "Marks `protocol-var` as a malt protocol and installs the authored method
+   specs - resolved into schemas and precompiled validators - onto both the
+   protocol's method signatures and the metadata of the generated method vars.
+   Called once as part of a `malt/defprotocol` definition.
+
+   `method-specs` is a map of method keyword to the authored :malt/\\* spec data."
+  [protocol-var method-specs]
   (let [protocol-ns (:ns (meta protocol-var))]
     (alter-var-root
      protocol-var
      (fn [protocol]
        (-> protocol
            (assoc :malt/protocol true)
-           (update :sigs update-vals #(enrich-sig protocol-ns %))))))
+           (update :sigs
+                   (fn [sigs]
+                     (reduce-kv
+                      (fn [sigs method-kw spec]
+                        (update sigs method-kw
+                                #(enrich-sig protocol-ns (merge % spec))))
+                      sigs
+                      method-specs))))))
+    (doseq [method-kw (keys method-specs)]
+      (let [sig (get-in @protocol-var [:sigs method-kw])]
+        (when-let [method-var (ns-resolve protocol-ns (:name sig))]
+          (alter-meta! method-var merge (select-keys sig var-meta-keys))))))
   protocol-var)
 
 (defn method-sig

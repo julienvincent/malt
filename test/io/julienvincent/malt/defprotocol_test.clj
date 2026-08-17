@@ -131,21 +131,26 @@
     :int))
 
 (deftest var-referenced-protocol-metadata
-  (let [proto-data (into {} Example3)]
+  (let [proto-data (into {} Example3)
+
+        count-people-sig
+        {:malt/params '[people belongings]
+         :malt/param-schemas {:people [:vector
+                                       [:map
+                                        [:name :string]]]
+                              :belongings [:vector :string]}
+         :malt/arguments-schema [:cat
+                                 [:vector
+                                  [:map
+                                   [:name :string]]]
+                                 [:vector :string]]
+         :malt/return-schema :int}]
     (is (match?
          {:malt/protocol true
-          :sigs {:count-people {:malt/params '[people belongings]
-                                :malt/param-schemas {:people [:vector
-                                                              [:map
-                                                               [:name :string]]]
-                                                     :belongings [:vector :string]}
-                                :malt/arguments-schema [:cat
-                                                        [:vector
-                                                         [:map
-                                                          [:name :string]]]
-                                                        [:vector :string]]
-                                :malt/return-schema :int}}}
-         proto-data))))
+          :sigs {:count-people count-people-sig}}
+         proto-data))
+
+    (is (match? count-people-sig (meta #'count-people)))))
 
 (deftest unresolved-protocol-schema-forms
   (let [impl (malt/reify Example3

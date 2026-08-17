@@ -187,6 +187,19 @@ Evaluating the protocol var shows the stored sigs:
    :malt/exception-validators {:not_found #object[...]}}}}
 ```
 
+The resolved schema data is also attached to the metadata of each generated method var, so a method's signature can be
+read directly from the method itself without going through the protocol:
+
+```clojure
+(meta #'create-user)
+{:malt/params [name age]
+ :malt/param-schemas {:name :string
+                      :age :int}
+ :malt/arguments-schema [:cat :string :int]
+ :malt/return-schema :string
+ ...}
+```
+
 ### `malt/defrecord`
 
 Inline protocol implementations are validated when the protocol was defined with `malt/defprotocol`. This lets records

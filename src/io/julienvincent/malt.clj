@@ -44,6 +44,20 @@
             :malt/return-validator #object[...]}}}
    ```
 
+   The resolved schema data (excluding the precompiled validators) is also
+   attached to the metadata of each generated method var, so a method's
+   signature can be read from the method itself:
+
+   ```clojure
+   (meta #'foo)
+   ;; =>
+   {:malt/params [name]
+    :malt/param-schemas {:name :string}
+    :malt/arguments-schema [:cat :string]
+    :malt/return-schema :string
+    ...}
+   ```
+
    Also defines a `?Name` var containing a Malli schema which can be used to
    assert a value implements the protocol. This is done through `satisfies?`."
   {:style/indent [1 :form [1]]}
@@ -54,14 +68,16 @@
                           attrs
                           (when doc {:doc doc})))
         protocol-schema-sym (symbol (str "?" protocol-sym))
-        qualified-protocol-sym (symbol (str (ns-name *ns*)) (str protocol-sym))]
+        qualified-protocol-sym (symbol (str (ns-name *ns*)) (str protocol-sym))
+        methods (mapv #(malt.syntax/normalize-protocol-method protocol-sym %) forms)
+        method-specs (into {} (map (juxt :method-kw :spec)) methods)]
     `(do
        (clojure.core/defprotocol ~name-sym
          ~@(cond-> []
              doc (conj doc)
              attrs (conj attrs))
-         ~@(mapv #(malt.syntax/normalize-protocol-method protocol-sym %) forms))
-       (malt.runtime/enrich-protocol-var! (var ~name-sym))
+         ~@(mapv :form methods))
+       (malt.runtime/enrich-protocol-var! (var ~name-sym) '~method-specs)
        (def ~protocol-schema-sym
          [:fn
           {:error/message ~(str "should satisfy " qualified-protocol-sym)}
