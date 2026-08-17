@@ -206,7 +206,7 @@
   "Given grouped [protocol-sym methods] pairs, returns the flat seq of protocol
    symbols and method forms with malt-protocol methods wrapped in validation.
    Methods of non-malt protocols are passed through untouched."
-  [grouped missing-protocol-error]
+  [grouped ^String missing-protocol-error]
   (mapcat (fn [[protocol-sym methods]]
             (when-not protocol-sym
               (throw (IllegalArgumentException. missing-protocol-error)))
