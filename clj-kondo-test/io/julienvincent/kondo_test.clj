@@ -135,3 +135,47 @@
    (find-resource! [_ _] nil)
    (create-resource! [_ _] nil))
  {})
+
+(malt/defprotocol MultiArityExample
+  (resolve-resource!
+    "Resolve a resource using one of the supported call forms."
+    {:operation :resolve-resource}
+    ([]
+     :nil)
+    ([resource ?SchemaReference]
+     ?SchemaReference)
+    ([resource ?SchemaReference fallback :string]
+     [:vector ?SchemaReference]
+     (throws [not_found]))))
+
+(def multi-arity-example
+  (malt/reify MultiArityExample
+    (resolve-resource! [_] nil)
+    (resolve-resource! [_ resource] resource)
+    (resolve-resource! [_ resource _fallback] [resource])))
+
+(resolve-resource! multi-arity-example)
+(resolve-resource! multi-arity-example 1)
+(resolve-resource! multi-arity-example 1 "fallback")
+
+(malt/defrecord MultiArityRecord
+  []
+  MultiArityExample
+  (resolve-resource! [_] nil)
+  (resolve-resource! [_ resource] resource)
+  (resolve-resource! [_ resource _fallback] [resource]))
+
+(def multi-arity-record (->MultiArityRecord))
+(resolve-resource! multi-arity-record)
+(resolve-resource! multi-arity-record 1)
+(resolve-resource! multi-arity-record 1 "fallback")
+
+(malt/extend-type String
+  MultiArityExample
+  (resolve-resource! [_] nil)
+  (resolve-resource! [_ resource] resource)
+  (resolve-resource! [_ resource _fallback] [resource]))
+
+(resolve-resource! "resource")
+(resolve-resource! "resource" 1)
+(resolve-resource! "resource" 1 "fallback")

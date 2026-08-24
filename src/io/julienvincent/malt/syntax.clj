@@ -36,71 +36,90 @@
       {:params params
        :schemas schemas})))
 
-(defn normalize-protocol-method
-  "Normalizes a malt method spec, returning
-   `{:method-kw <keyword> :spec <map> :form <method-form>}` where `:form` is a
-   plain clojure.core/defprotocol method form and `:spec` holds the authored
-   :malt/\\* schema data."
-  [protocol-sym method-spec]
-  (let [[method-sym & method-forms] method-spec
-        {:keys [doc attrs forms]} (take-doc+attrs method-forms)]
-    (when-not (<= 2 (count forms) 3)
-      (throw (IllegalArgumentException.
-              (str "Method spec must be of the form "
-                   "(" method-sym " <optional docstring> "
-                   "<optional metadata> [input-schema-1 ...] "
-                   "output-schema <optional (throws [...])>) for "
-                   protocol-sym "; got " (pr-str method-spec)))))
-    (let [[input-schemas output-schema throws-form] forms]
-      (when throws-form
-        (when-not (and (seq? throws-form)
-                       (= 'throws (first throws-form))
-                       (vector? (second throws-form)))
-          (throw (IllegalArgumentException.
-                  (str "throws clause must be of the form "
-                       "(throws [definition-or-class ...]) for "
-                       protocol-sym "/" method-sym "; got "
-                       (pr-str throws-form))))))
-      (when-not (vector? input-schemas)
+(defn- normalize-protocol-arity
+  [protocol-sym method-sym forms]
+  (when-not (<= 2 (count forms) 3)
+    (throw (IllegalArgumentException.
+            (str "Method arity must be of the form "
+                 "([input-schema-1 ...] output-schema "
+                 "<optional (throws [...])>) for "
+                 protocol-sym "/" method-sym "; got " (pr-str forms)))))
+  (let [[input-schemas output-schema throws-form] forms]
+    (when throws-form
+      (when-not (and (seq? throws-form)
+                     (= 2 (count throws-form))
+                     (= 'throws (first throws-form))
+                     (vector? (second throws-form)))
         (throw (IllegalArgumentException.
-                (str "Input schemas must be a vector for "
+                (str "throws clause must be of the form "
+                     "(throws [definition-or-class ...]) for "
+                     protocol-sym "/" method-sym "; got "
+                     (pr-str throws-form))))))
+    (when-not (vector? input-schemas)
+      (throw (IllegalArgumentException.
+              (str "Input schemas must be a vector for "
+                   protocol-sym "/" method-sym "; got "
+                   (pr-str input-schemas)))))
+    (let [{:keys [params schemas]}
+          (parse-schema-pairs
+           input-schemas
+           {:pairs-error (str "Input schemas must be param/schema pairs for "
+                              protocol-sym "/" method-sym)
+            :symbols-error (str "Parameter names must be symbols for "
+                                protocol-sym "/" method-sym)})]
+      (when (some #{'this} params)
+        (throw (IllegalArgumentException.
+                (str "Parameter name must not be `this` for "
                      protocol-sym "/" method-sym "; got "
                      (pr-str input-schemas)))))
-      (let [{:keys [params schemas]}
-            (parse-schema-pairs
-             input-schemas
-             {:pairs-error (str "Input schemas must be param/schema pairs for "
-                                protocol-sym "/" method-sym)
-              :symbols-error (str "Parameter names must be symbols for "
-                                  protocol-sym "/" method-sym)})]
-        (when (some #{'this} params)
-          (throw (IllegalArgumentException.
-                  (str "Parameter name must not be `this` for "
-                       protocol-sym "/" method-sym "; got "
-                       (pr-str input-schemas)))))
-        (let [throws-syms (when throws-form
-                            (second throws-form))
-              spec (cond-> {:malt/params params
-                            :malt/arguments-schema (when (seq params)
-                                                     (into [:cat] schemas))
-                            :malt/return-schema output-schema}
-                     (seq params)
-                     (assoc :malt/param-schemas
-                            (zipmap (mapv (comp keyword name) params)
-                                    schemas))
+      (let [throws-syms (when throws-form
+                          (second throws-form))]
+        {:arity (count params)
+         :arglist (into ['this] params)
+         :spec (cond-> {:params params
+                        :arguments-schema (when (seq params)
+                                            (into [:cat] schemas))
+                        :return-schema output-schema}
+                 (seq params)
+                 (assoc :param-schemas
+                        (zipmap (mapv (comp keyword name) params)
+                                schemas))
 
-                     throws-syms
-                     (assoc :malt/throws (vec throws-syms)))
-              method-meta (cond-> (meta method-sym)
-                            doc (assoc :doc doc)
-                            attrs (merge attrs))]
-          {:method-kw (keyword (name method-sym))
-           :spec spec
-           :form (list* (with-meta method-sym method-meta)
-                        (into ['this] params)
-                        (cond-> []
-                          doc (conj doc)
-                          attrs (conj attrs)))})))))
+                 throws-syms
+                 (assoc :throws (vec throws-syms)))}))))
+
+(defn normalize-protocol-method
+  "Normalizes a malt method spec, returning
+   `{:method-kw <keyword> :specs <vector> :form <method-form>}` where `:form` is
+   a plain clojure.core/defprotocol method form and `:specs` holds the authored
+   malt schema specs."
+  [protocol-sym method-spec]
+  (let [[method-sym & method-forms] method-spec
+        {:keys [doc attrs forms]} (take-doc+attrs method-forms)
+        arity-forms (if (and (seq forms)
+                             (every? seq? forms))
+                      forms
+                      [forms])
+        arities (mapv #(normalize-protocol-arity protocol-sym method-sym %)
+                      arity-forms)
+        duplicate-arity (some (fn [[arity n]]
+                                (when (< 1 n)
+                                  arity))
+                              (frequencies (mapv :arity arities)))]
+    (when duplicate-arity
+      (throw (IllegalArgumentException.
+              (str "Duplicate arity " duplicate-arity " for "
+                   protocol-sym "/" method-sym))))
+    (let [method-meta (cond-> (meta method-sym)
+                        doc (assoc :doc doc)
+                        attrs (merge attrs))]
+      {:method-kw (keyword (name method-sym))
+       :specs (mapv :spec arities)
+       :form (list* (with-meta method-sym method-meta)
+                    (concat (mapv :arglist arities)
+                            (cond-> []
+                              doc (conj doc)
+                              attrs (conj attrs))))})))
 
 (defn group-implementations
   "Groups a flat seq of protocol symbols and method forms - as accepted by
@@ -175,11 +194,13 @@
                                         (vec))]
           (list method-sym
                 (into [this-sym] params-syms)
-                `(let [sig# (malt.runtime/method-sig (var ~qualified-protocol-sym) ~method-kw)]
-                   (when-let [args-validator# (:malt/arguments-validator sig#)]
-                     (malt.runtime/validate-inputs! (:malt/arguments-schema sig#)
+                `(let [spec# (malt.runtime/method-spec (var ~qualified-protocol-sym)
+                                                       ~method-kw
+                                                       ~(count param-bindings))]
+                   (when-let [args-validator# (:arguments-validator spec#)]
+                     (malt.runtime/validate-inputs! (:arguments-schema spec#)
                                                     args-validator#
-                                                    (:malt/params sig#)
+                                                    (:params spec#)
                                                     [~@params-syms]
                                                     {:protocol '~qualified-protocol-sym
                                                      :method '~method-sym}))
@@ -188,13 +209,13 @@
                                      (do ~@body)
                                      (catch Exception ex#
                                        (malt.runtime/check-throws! ex#
-                                                                   (:malt/throws sig#)
-                                                                   (:malt/exception-validators sig#)
+                                                                   (:throws spec#)
+                                                                   (:exception-validators spec#)
                                                                    '~qualified-protocol-sym
                                                                    '~method-sym)))]
                        (malt.runtime/validate-value!
-                        (:malt/return-schema sig#)
-                        (:malt/return-validator sig#)
+                        (:return-schema spec#)
+                        (:return-validator spec#)
                         result#
                         {:type :malt/output-validation-failed
                          :phase :output
@@ -206,21 +227,62 @@
                                 :method '~method-sym}})
                        result#)))))))))
 
+(defn- wrap-protocol-methods
+  [protocol-sym methods ^String missing-protocol-error]
+  (when-not protocol-sym
+    (throw (IllegalArgumentException. missing-protocol-error)))
+  (let [protocol-var (resolve protocol-sym)
+        malt-protocol? (and (var? protocol-var)
+                            (:malt/protocol @protocol-var))]
+    [protocol-sym
+     (if malt-protocol?
+       (mapv #(normalize-method-impl protocol-sym %) methods)
+       methods)]))
+
+(defn- combine-method-arities
+  [methods]
+  (let [methods-by-name (group-by first methods)]
+    (mapv (fn [method-sym]
+            (let [method-forms (get methods-by-name method-sym)]
+              (if (= 1 (count method-forms))
+                (first method-forms)
+                (list* method-sym
+                       (mapv (fn [[_ arglist & body]]
+                               (list* arglist body))
+                             method-forms)))))
+          (distinct (map first methods)))))
+
+(defn- expand-method-arities
+  [methods]
+  (mapcat (fn [[method-sym & method-forms :as method-form]]
+            (if (and (seq method-forms)
+                     (every? seq? method-forms)
+                     (every? #(vector? (first %)) method-forms))
+              (mapv #(list* method-sym %) method-forms)
+              [method-form]))
+          methods))
+
 (defn wrap-method-impls
   "Given grouped [protocol-sym methods] pairs, returns the flat seq of protocol
    symbols and method forms with malt-protocol methods wrapped in validation.
    Methods of non-malt protocols are passed through untouched."
   [grouped ^String missing-protocol-error]
   (mapcat (fn [[protocol-sym methods]]
-            (when-not protocol-sym
-              (throw (IllegalArgumentException. missing-protocol-error)))
-            (let [protocol-var (resolve protocol-sym)
-                  malt-protocol? (and (var? protocol-var)
-                                      (:malt/protocol @protocol-var))]
-              (cons protocol-sym
-                    (if malt-protocol?
-                      (mapv #(normalize-method-impl protocol-sym %) methods)
-                      methods))))
+            (let [[protocol-sym methods]
+                  (wrap-protocol-methods protocol-sym methods missing-protocol-error)]
+              (cons protocol-sym methods)))
+          grouped))
+
+(defn wrap-extend-method-impls
+  "Wraps malt protocol methods and combines repeated method implementations into
+   the nested multi-arity form expected by clojure.core/extend-type."
+  [grouped ^String missing-protocol-error]
+  (mapcat (fn [[protocol-sym methods]]
+            (let [[protocol-sym methods]
+                  (wrap-protocol-methods protocol-sym
+                                         (expand-method-arities methods)
+                                         missing-protocol-error)]
+              (cons protocol-sym (combine-method-arities methods))))
           grouped))
 
 (defn normalize-extend-type-sym

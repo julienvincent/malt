@@ -1,7 +1,6 @@
 (ns ^:no-doc io.julienvincent.malt.runtime
   "Runtime support invoked by the code emitted from the io.julienvincent.malt
    macros. Nothing in this namespace is intended to be called directly by users."
-  (:refer-clojure :exclude [method-sig])
   (:require
    [io.julienvincent.malt.error :as malt.error]
    [io.julienvincent.malt.schema :as malt.schema]
@@ -43,40 +42,64 @@
                value))))
         throws-syms))
 
-(defn- enrich-sig
-  "Resolves the authored schema forms stored on a protocol method signature and
-   extends the signature with the resolved schemas and their precompiled
-   validators."
-  [protocol-ns sig]
+(defn- enrich-spec
+  "Resolves an authored method spec and precompiles its validators."
+  [protocol-ns spec]
   (let [resolve-schema #(malt.schema/resolve-schema-spec protocol-ns %)
-        arg-schemas (when (seq (:malt/arguments-schema sig))
-                      (mapv resolve-schema (rest (:malt/arguments-schema sig))))
-        return-schema (when (:malt/return-schema sig)
-                        (resolve-schema (:malt/return-schema sig)))
-        throws (when (seq (:malt/throws sig))
-                 (resolve-throws-definitions protocol-ns (:malt/throws sig)))]
-    (cond-> sig
+        arg-schemas (when (seq (:arguments-schema spec))
+                      (mapv resolve-schema (rest (:arguments-schema spec))))
+        return-schema (resolve-schema (:return-schema spec))
+        throws (when (seq (:throws spec))
+                 (resolve-throws-definitions protocol-ns (:throws spec)))]
+    (cond-> spec
       arg-schemas
-      (assoc :malt/arguments-schema (into [:cat] arg-schemas)
-             :malt/arguments-validator (m/validator (into [:cat] arg-schemas)))
+      (assoc :arguments-schema (into [:cat] arg-schemas)
+             :arguments-validator (m/validator (into [:cat] arg-schemas)))
 
-      (and arg-schemas (:malt/param-schemas sig))
-      (assoc :malt/param-schemas
-             (zipmap (mapv (comp keyword name) (:malt/params sig))
+      (and arg-schemas (:param-schemas spec))
+      (assoc :param-schemas
+             (zipmap (mapv (comp keyword name) (:params spec))
                      arg-schemas))
 
       return-schema
-      (assoc :malt/return-schema return-schema
-             :malt/return-validator (m/validator return-schema))
+      (assoc :return-schema return-schema
+             :return-validator (m/validator return-schema))
 
       throws
-      (assoc :malt/throws throws
-             :malt/exception-validators
+      (assoc :throws throws
+             :exception-validators
              (into {}
                    (keep (fn [{:keys [code schema] klass :class}]
                            (when schema
                              [(or code klass) (m/validator schema)])))
                    throws)))))
+
+(def ^:private spec->legacy-sig-keys
+  {:params :malt/params
+   :param-schemas :malt/param-schemas
+   :arguments-schema :malt/arguments-schema
+   :return-schema :malt/return-schema
+   :throws :malt/throws
+   :arguments-validator :malt/arguments-validator
+   :return-validator :malt/return-validator
+   :exception-validators :malt/exception-validators})
+
+(defn- spec->legacy-sig-data
+  [spec]
+  (reduce-kv (fn [sig-data spec-k value]
+               (if-let [sig-k (get spec->legacy-sig-keys spec-k)]
+                 (assoc sig-data sig-k value)
+                 sig-data))
+             {}
+             spec))
+
+(defn- enrich-sig
+  [protocol-ns sig authored-specs]
+  (let [specs (mapv #(enrich-spec protocol-ns %) authored-specs)
+        sig (assoc sig :malt/specs specs)]
+    (if (= 1 (count specs))
+      (merge sig (spec->legacy-sig-data (first specs)))
+      sig)))
 
 (def ^:private var-meta-keys
   [:malt/params
@@ -85,13 +108,27 @@
    :malt/return-schema
    :malt/throws])
 
+(def ^:private spec-var-meta-keys
+  [:params
+   :param-schemas
+   :arguments-schema
+   :return-schema
+   :throws])
+
+(defn- method-var-meta
+  [sig]
+  (assoc (select-keys sig var-meta-keys)
+         :malt/specs
+         (mapv #(select-keys % spec-var-meta-keys)
+               (:malt/specs sig))))
+
 (defn enrich-protocol-var!
   "Marks `protocol-var` as a malt protocol and installs the authored method
-   specs - resolved into schemas and precompiled validators - onto both the
-   protocol's method signatures and the metadata of the generated method vars.
-   Called once as part of a `malt/defprotocol` definition.
+   specs onto the protocol's method signatures, resolving schemas and compiling
+   validators. Resolved schema data is also attached to the generated method
+   vars. Called once as part of a `malt/defprotocol` definition.
 
-   `method-specs` is a map of method keyword to the authored :malt/\\* spec data."
+   `method-specs` maps each method keyword to its authored malt specs."
   [protocol-var method-specs]
   (let [protocol-ns (:ns (meta protocol-var))]
     (alter-var-root
@@ -102,21 +139,26 @@
            (update :sigs
                    (fn [sigs]
                      (reduce-kv
-                      (fn [sigs method-kw spec]
+                      (fn [sigs method-kw specs]
                         (update sigs method-kw
-                                #(enrich-sig protocol-ns (merge % spec))))
+                                #(enrich-sig protocol-ns % specs)))
                       sigs
                       method-specs))))))
     (doseq [method-kw (keys method-specs)]
       (let [sig (get-in @protocol-var [:sigs method-kw])]
         (when-let [method-var (ns-resolve protocol-ns (:name sig))]
-          (alter-meta! method-var merge (select-keys sig var-meta-keys))))))
+          (alter-meta! method-var merge (method-var-meta sig))))))
   protocol-var)
 
-(defn method-sig
-  "Returns the enriched signature map for a protocol method."
-  [protocol-var method-kw]
-  (get-in @protocol-var [:sigs method-kw]))
+(defn method-spec
+  "Returns the enriched spec for a protocol method arity."
+  [protocol-var method-kw arity]
+  (or (some (fn [spec]
+              (when (= arity (count (:params spec)))
+                spec))
+            (get-in @protocol-var [:sigs method-kw :malt/specs]))
+      (throw (IllegalArgumentException.
+              (str "No arity " arity " found for protocol method " method-kw)))))
 
 (defn- call-target-description
   [{:keys [protocol method constructor record]}]

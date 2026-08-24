@@ -109,3 +109,52 @@
   (let [impl (->Service2 "some-prefix-")]
     (is (= "some-prefix-john" (create-user impl "john")))
     (is (= 1 (foobar impl 1)))))
+
+(malt/defprotocol MultiArityApi
+  (lookup-value
+    ([value :string]
+     :string)
+    ([left :int right :int]
+     :int)))
+
+(malt/defrecord MultiArityService
+  [prefix :string]
+
+  MultiArityApi
+  (lookup-value [{:keys [prefix]} value]
+    (if (= "bad-output" value)
+      1
+      (str prefix value)))
+  (lookup-value [_ left right]
+    (if (neg? left)
+      "bad-output"
+      (+ left right))))
+
+(deftest multi-arity-inline-implementations-test
+  (let [impl (->MultiArityService "prefix-")]
+    (is (= "prefix-value" (lookup-value impl "value")))
+    (is (= 3 (lookup-value impl 1 2)))
+
+    (is (exception? clojure.lang.ExceptionInfo
+                    #"Invalid parameter 'value' passed to 'lookup-value'"
+                    {:type :malt/input-validation-failed
+                     :input [1]}
+                    (lookup-value impl 1)))
+
+    (is (exception? clojure.lang.ExceptionInfo
+                    #"Invalid parameter 'right' passed to 'lookup-value'"
+                    {:type :malt/input-validation-failed
+                     :input ['_ "2"]}
+                    (lookup-value impl 1 "2")))
+
+    (is (exception? clojure.lang.ExceptionInfo
+                    #"Invalid return value from 'lookup-value'"
+                    {:type :malt/output-validation-failed
+                     :output 1}
+                    (lookup-value impl "bad-output")))
+
+    (is (exception? clojure.lang.ExceptionInfo
+                    #"Invalid return value from 'lookup-value'"
+                    {:type :malt/output-validation-failed
+                     :output "bad-output"}
+                    (lookup-value impl -1 2)))))

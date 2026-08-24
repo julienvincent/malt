@@ -99,6 +99,7 @@ Used to define a typed Clojure protocol. The protocol remains native, but the sc
 validators and makes the contract visible to tools and humans.
 
 - Accepts param/schema pairs in the method vector, followed by the return schema.
+- Supports multiple fixed arities by wrapping each complete method spec in a list.
 - Optionally accepts a `(throws [...])` clause after the return schema to declare checked exceptions - see
   [Checked exceptions](#checked-exceptions). Methods without a `throws` clause are expected not to throw.
 - Produces a normal Clojure protocol plus a `?ProtocolName` Malli schema var.
@@ -118,7 +119,7 @@ validators and makes the contract visible to tools and humans.
     (throws [not-found])))
 ```
 
-Method definitions differ slightly from `clojure.core/defprotocol` in that the docstring and metadata needs to be placed
+Method definitions differ slightly from `clojure.core/defprotocol` in that the docstring and metadata need to be placed
 before the params vector, instead of after. This makes the definition read more like `defn` and makes the return schema
 clearer.
 
@@ -134,12 +135,29 @@ clearer.
 Additionally, the `this` parameter from `clojure.core/defprotocol` is completely omitted as we consider it unnecessary
 due to being required by every method.
 
+#### Multiple arities
+
+For a method with multiple arities, wrap each input, return, and optional `throws` contract in a list. Each arity can
+use different input schemas, return schemas, and checked exceptions:
+
+```clojure
+(malt/defprotocol UserStore
+  (find-user
+    "Find a user, optionally using additional lookup options."
+    ([id :string]
+     ?User
+     (throws [not-found]))
+    ([id :string options ?LookupOptions]
+     [:maybe ?User]
+     (throws [not-found lookup-failed]))))
+```
+
 Exports:
 
 - `UserStore`: the protocol var.
 - `?UserStore`: Malli schema that checks `satisfies?` for the protocol.
 
-##### The Protocol Var
+#### Static Protocol Data
 
 The resulting Clojure protocol has additional data associated with it. This data is what is used by `malt/reify`,
 `malt/extend-type`, and `malt/defrecord` to augment implementations with schema validations.
@@ -147,58 +165,93 @@ The resulting Clojure protocol has additional data associated with it. This data
 The data is considered part of the public API and it is fully the expectation that other tools, and you, can use the
 protocol data to build on top of.
 
-The protocol var (accessed by `#'ProtocolVar`) stores a `:sigs` map containing the underlying Clojure method
-definitions, and malt additionally stores namespaced data there as well.
+The protocol root value (accessed as `UserStore` or `@#'UserStore`) stores a `:sigs` map containing the underlying
+Clojure method definitions, and malt additionally stores namespaced data there as well.
 
-You can verify if a protocol is a malt protocol by checking the `:malt/protocol` field on the var:
-`(:malt/protocol #'UserStore)`
+You can verify if a protocol is a malt protocol by checking the `:malt/protocol` field on the root value:
+`(:malt/protocol UserStore)`.
 
-Evaluating the protocol var shows the stored sigs:
+Evaluating the protocol root value shows the stored sigs. Every method contains a `:malt/specs` vector which defines the
+input/output/throws spec for each method arity:
 
 ```clojure
-#'UserStore
+UserStore
+{:malt/protocol true
+ :sigs
+ {:create-user
+  {:malt/specs
+   [{:params [name age]
+     ;; A map of :param-name -> Malli schema, useful for tools
+     :param-schemas {:name :string
+                     :age :int}
+     ;; A prepared schema for validating function-call arguments
+     :arguments-schema [:cat :string :int]
+     :return-schema :string
+     ;; Precompiled Malli validators via `(m/validator schema)`
+     :arguments-validator #object[...]
+     :return-validator #object[...]}]}
+
+  :find-user
+  {:malt/specs
+   ;; Multi-arity specs are listed sequentially
+   [{:params [id]
+     ...}
+    {:params [id options]
+     ...}]}
+
+  :suspend-user!
+  {:malt/specs
+   [{...
+     ;; The resolved error definitions from the (throws [...]) clause
+     :throws [{:code :not_found
+               :message "User not found"
+               :schema [:map [:id :string]]}]
+     ;; Error code -> precompiled validator for the definition's :schema
+     :exception-validators {:not_found #object[...]}}]}}}
+```
+
+The resolved schema data is also attached to the metadata of each generated method var, so a method's specs can be read
+directly without going through the protocol. Precompiled validators are omitted from method var metadata:
+
+```clojure
+(meta #'create-user)
+{:malt/specs
+ [{:params [name age]
+   :param-schemas {:name :string
+                   :age :int}
+   :arguments-schema [:cat :string :int]
+   :return-schema :string}]
+
+ ...}
+```
+
+<details>
+
+<summary>Legacy Malt metadata keys</summary>
+
+Historically Malt did not support multi-arity protocols and stored all sig spec keys directly on the method signature
+using `:malt/` namespaced keys.
+
+```clojure
+UserStore
 {:malt/protocol true
  :sigs
  {:create-user
   {:malt/params [name age]
-   ;; A map of :param-name -> Malli schema, useful for tools
    :malt/param-schemas {:name :string
                         :age :int}
-   ;; A prepared schema for validating a function call arguments
    :malt/arguments-schema [:cat :string :int]
    :malt/return-schema :string
-   ;; These are precompiled malli validators via `(m/validator ?schema)`
    :malt/arguments-validator #object[...]
-   :malt/return-validator #object[...]}
-  :delete-user
-  {:malt/params [id]
-   :malt/param-schemas {:id :string}
-   :malt/arguments-schema [:cat :string]
-   :malt/return-schema :nil
-   :malt/arguments-validator #object[...]
-   :malt/return-validator #object[...]}
-  :suspend-user!
-  {...
-   ;; The resolved error definition maps from the (throws [...]) clause
-   :malt/throws [{:code :not_found
-                  :message "User not found"
-                  :schema [:map [:id :string]]}]
-   ;; A map of error code -> precompiled Malli validator for the definition's :schema
-   :malt/exception-validators {:not_found #object[...]}}}}
+   :malt/return-validator #object[...]}}}
 ```
 
-The resolved schema data is also attached to the metadata of each generated method var, so a method's signature can be
-read directly from the method itself without going through the protocol:
+The keys are still included for backwards compatibility on single-arity protocol methods.
 
-```clojure
-(meta #'create-user)
-{:malt/params [name age]
- :malt/param-schemas {:name :string
-                      :age :int}
- :malt/arguments-schema [:cat :string :int]
- :malt/return-schema :string
- ...}
-```
+This form is now considered deprecated and will be removed in a future version of Malt. It is expected that you migrate
+to using the new `:malt/specs` vector instead.
+
+</details>
 
 ### `malt/defrecord`
 
@@ -404,8 +457,8 @@ The original exception is always preserved as the `ex-cause` of the wrapping exc
 
 #### Errors are part of the spec
 
-The error and their full definitions are exposed on the underlying protocol var metadata under a `:malt/throws` key.
-This data can and should be used by external tools to generate clients, openapi schemas, or things like HTTP endpoint
+The errors and their full definitions are exposed in each method's `:malt/specs` entries under the `:throws` key. This
+data can and should be used by external tools to generate clients, OpenAPI schemas, or things like HTTP endpoint
 definitions.
 
 Both error and exception definitions have a dedicated `:metadata` map which is there for you to store whatever

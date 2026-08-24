@@ -26,57 +26,107 @@
          (and (seq children)
               (= 'throws (api/sexpr (first children)))))))
 
+(defn- parse-method-arity
+  [arity-children]
+  (let [[arity-children throws-node]
+        (if (and (<= 3 (count arity-children))
+                 (throws-node? (last arity-children)))
+          [(butlast arity-children) (last arity-children)]
+          [arity-children nil])
+        throws-vec-node (when throws-node
+                          (second (:children throws-node)))
+        valid-throws? (or (nil? throws-node)
+                          (and (= 2 (count (:children throws-node)))
+                               (vector-node? throws-vec-node)))]
+    (when (and valid-throws?
+               (= 2 (count arity-children))
+               (vector-node? (first arity-children)))
+      (let [[input-schemas-node output-schema-node] arity-children
+            {:keys [pair-form? param-nodes schema-nodes]}
+            (parse-input-schemas-node input-schemas-node)
+            params-sexpr (mapv api/sexpr param-nodes)]
+        (when (and pair-form?
+                   (every? symbol? params-sexpr)
+                   (not-any? #{'this} params-sexpr))
+          (let [input-sexpr (mapv api/sexpr schema-nodes)
+                throws-ref-nodes (when throws-vec-node
+                                   (:children throws-vec-node))
+                spec (cond-> {:params params-sexpr
+                              :arguments-schema (when (seq input-sexpr)
+                                                  (into [:cat] input-sexpr))
+                              :return-schema (api/sexpr output-schema-node)}
+                       (seq params-sexpr)
+                       (assoc :param-schemas
+                              (zipmap (mapv (fn [sym]
+                                              (keyword (name sym)))
+                                            params-sexpr)
+                                      input-sexpr))
+
+                       throws-node
+                       (assoc :throws (mapv api/sexpr throws-ref-nodes)))]
+            {:arity (count params-sexpr)
+             :arglist-node (api/vector-node
+                            (into [(api/token-node 'this)] param-nodes))
+             :reference-nodes (concat schema-nodes
+                                      [output-schema-node]
+                                      throws-ref-nodes)
+             :spec spec}))))))
+
+(defn- spec->legacy-meta
+  [spec]
+  (cond-> {:malt/params (:params spec)
+           :malt/arguments-schema (:arguments-schema spec)
+           :malt/return-schema (:return-schema spec)}
+    (:param-schemas spec)
+    (assoc :malt/param-schemas (:param-schemas spec))
+
+    (contains? spec :throws)
+    (assoc :malt/throws (:throws spec))))
+
 (defn- normalize-method [method-node]
-  (let [[method-name & rest-children] (:children method-node)
-        [doc-node rest-children] (if (and (seq rest-children)
-                                          (string? (api/sexpr (first rest-children))))
-                                   [(first rest-children) (rest rest-children)]
-                                   [nil rest-children])
-        [attr-node rest-children] (if (and (seq rest-children)
-                                           (map? (api/sexpr (first rest-children))))
-                                    [(first rest-children) (rest rest-children)]
-                                    [nil rest-children])
-        [rest-children throws-node] (if (and (>= (count rest-children) 3)
-                                             (throws-node? (last rest-children)))
-                                      [(butlast rest-children) (last rest-children)]
-                                      [rest-children nil])
-        schema-form? (and (= 2 (count rest-children))
-                          (vector-node? (first rest-children)))
-        method-children (if schema-form?
-                          (let [[input-schemas-node output-schema-node] rest-children
-                                {:keys [pair-form? param-nodes schema-nodes]} (parse-input-schemas-node
-                                                                               input-schemas-node)]
-                            (if pair-form?
-                              (let [params-sexpr (mapv api/sexpr param-nodes)
-                                    input-sexpr (mapv api/sexpr schema-nodes)
-                                    schema-map-sexpr (zipmap (mapv (fn [sym]
-                                                                     (keyword (name sym)))
-                                                                   params-sexpr)
-                                                             input-sexpr)
-                                    args-schema-sexpr (when (seq input-sexpr)
-                                                        (into [:cat] input-sexpr))
-                                    output-sexpr (api/sexpr output-schema-node)
-                                    arity (count schema-nodes)
-                                    method-meta (cond-> (merge (meta (api/sexpr method-name))
-                                                               (cond-> {:malt/params params-sexpr
-                                                                        :malt/arguments-schema args-schema-sexpr
-                                                                        :malt/return-schema output-sexpr}
-                                                                 (seq params-sexpr)
-                                                                 (assoc :malt/param-schemas schema-map-sexpr)))
-                                                  doc-node (assoc :doc (api/sexpr doc-node))
-                                                  attr-node (merge (api/sexpr attr-node)))
-                                    method-name (with-meta method-name method-meta)
-                                    arg-vector (api/vector-node (into [(api/token-node 'this)]
-                                                                      (map (fn [node]
-                                                                             (api/token-node (api/sexpr node)))
-                                                                           param-nodes)))
-                                    doc+attr (cond-> []
-                                               doc-node (conj doc-node)
-                                               attr-node (conj attr-node))]
-                                (into [method-name arg-vector] doc+attr))
-                              (:children method-node)))
-                          (:children method-node))]
-    (api/list-node method-children)))
+  (let [[method-name & method-children] (:children method-node)
+        [doc-node method-children] (if (and (seq method-children)
+                                            (string? (api/sexpr (first method-children))))
+                                     [(first method-children) (rest method-children)]
+                                     [nil method-children])
+        [attr-node method-children] (if (and (seq method-children)
+                                             (map? (api/sexpr (first method-children))))
+                                      [(first method-children) (rest method-children)]
+                                      [nil method-children])
+        multi-arity? (and (seq method-children)
+                          (every? list-node? method-children))
+        arity-children (if multi-arity?
+                         (mapv :children method-children)
+                         [method-children])
+        arities (mapv parse-method-arity arity-children)
+        duplicate-arity (when (every? some? arities)
+                          (some (fn [[arity n]]
+                                  (when (< 1 n)
+                                    arity))
+                                (frequencies (mapv :arity arities))))]
+    (when duplicate-arity
+      (api/reg-finding!
+       (assoc (meta method-name)
+              :message (str "Duplicate arity " duplicate-arity " for "
+                            (api/sexpr method-name))
+              :type :malt/duplicate-arity)))
+    (if (and (seq arities) (every? some? arities))
+      (let [specs (mapv :spec arities)
+            method-meta (cond-> (merge (meta (api/sexpr method-name))
+                                       {:malt/specs specs})
+                          (= 1 (count specs)) (merge (spec->legacy-meta (first specs)))
+                          doc-node (assoc :doc (api/sexpr doc-node))
+                          attr-node (merge (api/sexpr attr-node)))
+            method-name (with-meta method-name method-meta)
+            doc+attr (cond-> []
+                       doc-node (conj doc-node)
+                       attr-node (conj attr-node))]
+        {:node (api/list-node (concat [method-name]
+                                      (mapv :arglist-node arities)
+                                      doc+attr))
+         :reference-nodes (mapcat :reference-nodes arities)})
+      {:node method-node
+       :reference-nodes []})))
 
 (defn defprotocol [{:keys [node]}]
   (let [[_ name-node & rest-children] (:children node)
@@ -102,36 +152,9 @@
                     doc-node (assoc :doc (api/sexpr doc-node))
                     attr-node (merge (api/sexpr attr-node)))
         name-node (with-meta name-node name-meta)
-        method-schema-nodes (->> rest-children
-                                 (mapcat (fn [method-node]
-                                           (let [[_method-name & method-rest] (:children method-node)
-                                                 [_doc method-rest] (if (and (seq method-rest)
-                                                                             (string? (api/sexpr (first method-rest))))
-                                                                      [(first method-rest) (rest method-rest)]
-                                                                      [nil method-rest])
-                                                 [_attr method-rest] (if (and (seq method-rest)
-                                                                              (map? (api/sexpr (first method-rest))))
-                                                                       [(first method-rest) (rest method-rest)]
-                                                                       [nil method-rest])
-                                                 [method-rest throws-node] (if (and (>= (count method-rest) 3)
-                                                                                    (throws-node? (last method-rest)))
-                                                                             [(butlast method-rest) (last method-rest)]
-                                                                             [method-rest nil])
-                                                 throws-ref-nodes (when throws-node
-                                                                    (let [throws-vec (second (:children throws-node))]
-                                                                      (when (vector-node? throws-vec)
-                                                                        (:children throws-vec))))]
-                                             (concat
-                                              (when (= 2 (count method-rest))
-                                                (let [[input-schemas-node output-schema-node] method-rest]
-                                                  (when (vector-node? input-schemas-node)
-                                                    (let [{:keys [pair-form? schema-nodes]} (parse-input-schemas-node
-                                                                                             input-schemas-node)]
-                                                      (when pair-form?
-                                                        (concat schema-nodes [output-schema-node]))))))
-                                              throws-ref-nodes))))
-                                 (remove nil?))
-        methods (mapv normalize-method rest-children)
+        normalized-methods (mapv normalize-method rest-children)
+        method-schema-nodes (mapcat :reference-nodes normalized-methods)
+        methods (mapv :node normalized-methods)
         defprotocol-node (api/list-node (concat (cond-> [(api/token-node 'defprotocol)
                                                          name-node]
                                                   doc-node (conj doc-node)

@@ -23,7 +23,14 @@
     (is (match?
          {:doc "Protocol docs"
           :malt/protocol true
-          :sigs {:with-docstrings {:malt/params '[a b]
+          :sigs {:with-docstrings {:malt/specs [{:params '[a b]
+                                                 :param-schemas {:a :int
+                                                                 :b :int}
+                                                 :arguments-schema [:cat :int :int]
+                                                 :return-schema :int
+                                                 :arguments-validator (matchers/pred #(not (nil? %)))
+                                                 :return-validator (matchers/pred #(not (nil? %)))}]
+                                   :malt/params '[a b]
                                    :malt/param-schemas {:a :int
                                                         :b :int}
                                    :malt/arguments-schema [:cat :int :int]
@@ -34,7 +41,12 @@
                                    :doc "Docstring"
                                    :test/meta 1}
 
-                 :with-nothing {:malt/params '[]
+                 :with-nothing {:malt/specs [{:params '[]
+                                              :arguments-schema nil
+                                              :return-schema :int
+                                              :arguments-validator matchers/absent
+                                              :return-validator (matchers/pred #(not (nil? %)))}]
+                                :malt/params '[]
                                 :malt/arguments-schema nil
                                 :malt/return-schema :int
                                 :malt/arguments-validator matchers/absent
@@ -175,3 +187,107 @@
                (foobar [_ input] input))]
 
     (is (= 2 (foobar impl 2)))))
+
+(malt/defprotocol MultiArityExample
+  (foo
+    "Docstring"
+    {:a/b 1}
+    ([a :int b :int]
+     :int)
+    ([a :string]
+     :string)))
+
+(malt/defprotocol MultiArityWithZeroExample
+  (zero-or-one
+    ([value :int]
+     :int)
+    ([]
+     :string)))
+
+(deftest multi-arity-metadata-test
+  (let [proto-data (into {} MultiArityExample)]
+    (is (match?
+         {:malt/protocol true
+          :sigs {:foo (matchers/equals
+                       {:malt/specs [{:params '[a b]
+                                      :param-schemas {:a :int
+                                                      :b :int}
+                                      :arguments-schema [:cat :int :int]
+                                      :return-schema :int
+                                      :arguments-validator (matchers/pred #(not (nil? %)))
+                                      :return-validator (matchers/pred #(not (nil? %)))}
+                                     {:params '[a]
+                                      :param-schemas {:a :string}
+                                      :arguments-schema [:cat :string]
+                                      :return-schema :string
+                                      :arguments-validator (matchers/pred #(not (nil? %)))
+                                      :return-validator (matchers/pred #(not (nil? %)))}]
+                        :arglists '([this a b] [this a])
+                        :doc "Docstring"
+                        :name 'foo
+                        :tag nil
+                        :a/b 1})}}
+
+         proto-data))))
+
+(deftest multi-arity-with-zero-metadata-test
+  (let [proto-data (into {} MultiArityWithZeroExample)]
+    (is (match?
+         {:sigs
+          {:zero-or-one
+           {:malt/specs
+            [{:params '[value]
+              :param-schemas {:value :int}
+              :arguments-schema [:cat :int]
+              :return-schema :int
+              :arguments-validator (matchers/pred #(not (nil? %)))
+              :return-validator (matchers/pred #(not (nil? %)))}
+             {:params '[]
+              :arguments-schema nil
+              :return-schema :string
+              :arguments-validator matchers/absent
+              :return-validator (matchers/pred #(not (nil? %)))}]
+            :arglists '([this value] [this])}}}
+         proto-data))))
+
+(deftest duplicate-multi-arity-test
+  (is (exception?
+       IllegalArgumentException
+       #"Duplicate arity 1 for DuplicateArity/duplicate"
+       nil
+       (try
+         (binding [*ns* (the-ns 'io.julienvincent.malt.defprotocol-test)]
+           (macroexpand-1
+            '(io.julienvincent.malt/defprotocol DuplicateArity
+               (duplicate
+                 ([first-value :int]
+                  :int)
+                 ([second-value :string]
+                  :string)))))
+         (catch clojure.lang.Compiler$CompilerException ex
+           (throw (ex-cause ex)))))))
+
+(deftest multi-arity-call-test
+  (let [impl (malt/reify MultiArityExample
+               (foo [_ a] a)
+               (foo [_ a b] (+ a b)))]
+    (is (= 2 (foo impl 1 1)))
+    (is (= "foo" (foo impl "foo")))))
+
+(deftest multi-arity-validation-test
+  (let [impl (malt/reify MultiArityExample
+               (foo [_ _] 1)
+               (foo [_ _ _] "foo"))]
+    (is (exception? clojure.lang.ExceptionInfo
+                    #"Invalid parameter 'a' passed to 'foo'"
+                    {:type :malt/input-validation-failed
+                     :input [1]
+                     :errors [["should be a string"]]}
+                    (foo impl 1)))
+
+    (is (exception? Exception
+                    #"Invalid return value from 'foo'"
+                    {:type :malt/output-validation-failed
+                     :output 1
+                     :errors ["should be a string"]}
+                    (foo impl "foo")))))

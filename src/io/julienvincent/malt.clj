@@ -11,37 +11,42 @@
 
    This is the core malt API entrypoint.
 
-   Method specs take param/schema pairs followed by a return schema and an
-   optional `(throws [...])` clause for checked exceptions.
+   A method spec takes param/schema pairs followed by a return schema and an
+   optional `(throws [...])` clause for checked exceptions. Methods with
+   multiple fixed arities wrap each complete spec in a list.
 
    Methods without a `throws` clause are expected not to throw.
 
    ```clojure
    (defprotocol UserStore
      (create-user [name :string age :int] :string)
+     (find-user
+       ([id :string] ?User)
+       ([id :string options ?Options] [:maybe ?User]))
      (suspend-user! [id :string]
        :nil
        (throws [not-found Exception])))
    ```
 
-   All provided data is made available on the produced protocol var and can be
-   accessed through `#'`:
+   All provided data is made available on the produced protocol root value:
 
    ```clojure
    (malt/defprotocol Foo
      (foo [name :string]
        :string))
 
-   #'UserStore
+   Foo
    ;; =>
    {:malt/protocol true
-    :sigs {:create-user
-           {:malt/params [name]
-            :malt/param-schemas {:name :string}
-            :malt/arguments-schema [:cat :string]
-            :malt/return-schema :string
-            :malt/arguments-validator #object[...]
-            :malt/return-validator #object[...]}}}
+    :sigs {:foo
+           {:malt/specs
+            [{:params [name]
+              :param-schemas {:name :string}
+              :arguments-schema [:cat :string]
+              :return-schema :string
+              :arguments-validator #object[...]
+              :return-validator #object[...]}]
+            ...}}}
    ```
 
    The resolved schema data (excluding the precompiled validators) is also
@@ -51,10 +56,11 @@
    ```clojure
    (meta #'foo)
    ;; =>
-   {:malt/params [name]
-    :malt/param-schemas {:name :string}
-    :malt/arguments-schema [:cat :string]
-    :malt/return-schema :string
+   {:malt/specs
+    [{:params [name]
+      :param-schemas {:name :string}
+      :arguments-schema [:cat :string]
+      :return-schema :string}]
     ...}
    ```
 
@@ -70,7 +76,7 @@
         protocol-schema-sym (symbol (str "?" protocol-sym))
         qualified-protocol-sym (symbol (str (ns-name *ns*)) (str protocol-sym))
         methods (mapv #(malt.syntax/normalize-protocol-method protocol-sym %) forms)
-        method-specs (into {} (map (juxt :method-kw :spec)) methods)]
+        method-specs (into {} (map (juxt :method-kw :specs)) methods)]
     `(do
        (clojure.core/defprotocol ~name-sym
          ~@(cond-> []
@@ -193,7 +199,7 @@
       (throw (IllegalArgumentException.
               (str "extend-type requires at least one protocol; got " (pr-str type-sym)))))
     `(clojure.core/extend-type ~type-sym
-       ~@(malt.syntax/wrap-method-impls
+       ~@(malt.syntax/wrap-extend-method-impls
           grouped
           (str "Missing protocol in extend-type for " (pr-str type-sym))))))
 

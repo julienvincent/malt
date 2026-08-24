@@ -96,6 +96,29 @@
       :malt (malt.error/throw! :fault "Fault")
       :ok nil)))
 
+(malt/defprotocol MultiArityCheckedExceptions
+  (fail!
+    ([id :string]
+     :nil
+     (throws [not_found]))
+    ([resource :string error-code :keyword]
+     :nil
+     (throws [conflict]))))
+
+(malt/defrecord MultiArityApi
+  []
+  MultiArityCheckedExceptions
+  (fail! [_ id]
+    (case id
+      "not-found" (malt.error/throw! not_found {:id id})
+      "conflict" (malt.error/throw! conflict {:resource id})
+      nil))
+  (fail! [_ resource error-code]
+    (case error-code
+      :conflict (malt.error/throw! conflict {:resource resource})
+      :not-found (malt.error/throw! not_found {:id resource})
+      nil)))
+
 (deftest checked-protocol-metadata-test
   (let [proto-data (into {} CheckedExceptions)]
     (is (match?
@@ -119,6 +142,48 @@
                            :malt/exception-validators
                            {java.lang.Exception (matchers/pred #(not (nil? %)))}}}}
          proto-data))))
+
+(deftest multi-arity-checked-protocol-metadata-test
+  (let [proto-data (into {} MultiArityCheckedExceptions)]
+    (is (match?
+         {:sigs
+          {:fail!
+           {:malt/specs
+            [{:throws [not_found]
+              :exception-validators
+              {:not_found (matchers/pred #(not (nil? %)))}}
+             {:throws [conflict]
+              :exception-validators
+              {:conflict (matchers/pred #(not (nil? %)))}}]}}}
+         proto-data))))
+
+(deftest multi-arity-checked-exceptions-test
+  (let [api (->MultiArityApi)]
+    (testing "each arity accepts its declared exception"
+      (is (exception? clojure.lang.ExceptionInfo
+                      "Resource not found"
+                      {:type :malt/error
+                       :code :not_found
+                       :data {:id "not-found"}}
+                      (fail! api "not-found")))
+
+      (is (exception? clojure.lang.ExceptionInfo
+                      "Resource conflict"
+                      {:type :malt/error
+                       :code :conflict
+                       :data {:resource "resource"}}
+                      (fail! api "resource" :conflict))))
+
+    (testing "throws declarations do not leak between arities"
+      (is (exception? clojure.lang.ExceptionInfo
+                      #"Unspecified exception thrown from method 'fail!'"
+                      {:type :malt/unspecified-exception-error}
+                      (fail! api "conflict")))
+
+      (is (exception? clojure.lang.ExceptionInfo
+                      #"Unspecified exception thrown from method 'fail!'"
+                      {:type :malt/unspecified-exception-error}
+                      (fail! api "resource" :not-found))))))
 
 (deftest checked-error-test
   (let [api (->Api)]

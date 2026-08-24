@@ -51,3 +51,59 @@
 (deftest native-protocol-extensions-test
   (let [impl (external-record/->External 3)]
     (is (= 1 (foobar impl 1)))))
+
+(malt/defprotocol MultiArityExample
+  (combine-values
+    ([suffix :string]
+     :string)
+    ([left :int right :int]
+     :int)))
+
+(malt/extend-type String
+  MultiArityExample
+  (combine-values [original suffix]
+    (if (= "bad-output" suffix)
+      1
+      (str original suffix)))
+  (combine-values [_ left right]
+    (if (neg? left)
+      "bad-output"
+      (+ left right))))
+
+(malt/extend-type Long
+  MultiArityExample
+  (combine-values
+    ([original suffix]
+     (str original suffix))
+    ([_ left right]
+     (+ left right))))
+
+(deftest multi-arity-extend-methods-test
+  (is (= "abc123" (combine-values "abc" "123")))
+  (is (= 3 (combine-values "abc" 1 2)))
+  (is (= "1123" (combine-values 1 "123")))
+  (is (= 3 (combine-values 1 1 2)))
+
+  (is (exception? clojure.lang.ExceptionInfo
+                  #"Invalid parameter 'suffix' passed to 'combine-values'"
+                  {:type :malt/input-validation-failed
+                   :input [1]}
+                  (combine-values "abc" 1)))
+
+  (is (exception? clojure.lang.ExceptionInfo
+                  #"Invalid parameter 'right' passed to 'combine-values'"
+                  {:type :malt/input-validation-failed
+                   :input ['_ "2"]}
+                  (combine-values "abc" 1 "2")))
+
+  (is (exception? clojure.lang.ExceptionInfo
+                  #"Invalid return value from 'combine-values'"
+                  {:type :malt/output-validation-failed
+                   :output 1}
+                  (combine-values "abc" "bad-output")))
+
+  (is (exception? clojure.lang.ExceptionInfo
+                  #"Invalid return value from 'combine-values'"
+                  {:type :malt/output-validation-failed
+                   :output "bad-output"}
+                  (combine-values "abc" -1 2))))
