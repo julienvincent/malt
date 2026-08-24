@@ -106,27 +106,22 @@
    :malt/param-schemas
    :malt/arguments-schema
    :malt/return-schema
-   :malt/throws])
-
-(def ^:private spec-var-meta-keys
-  [:params
-   :param-schemas
-   :arguments-schema
-   :return-schema
-   :throws])
+   :malt/throws
+   :malt/arguments-validator
+   :malt/return-validator
+   :malt/exception-validators])
 
 (defn- method-var-meta
   [sig]
   (assoc (select-keys sig var-meta-keys)
          :malt/specs
-         (mapv #(select-keys % spec-var-meta-keys)
-               (:malt/specs sig))))
+         (:malt/specs sig)))
 
 (defn enrich-protocol-var!
   "Marks `protocol-var` as a malt protocol and installs the authored method
    specs onto the protocol's method signatures, resolving schemas and compiling
-   validators. Resolved schema data is also attached to the generated method
-   vars. Called once as part of a `malt/defprotocol` definition.
+   validators. The complete enriched specs are also attached to the generated
+   method vars. Called once as part of a `malt/defprotocol` definition.
 
    `method-specs` maps each method keyword to its authored malt specs."
   [protocol-var method-specs]

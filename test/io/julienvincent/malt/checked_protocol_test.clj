@@ -141,7 +141,15 @@
                  :do-qux! {:malt/throws [strict_error]
                            :malt/exception-validators
                            {java.lang.Exception (matchers/pred #(not (nil? %)))}}}}
-         proto-data))))
+         proto-data))
+
+    (is (match?
+         {:malt/specs
+          [{:exception-validators
+            {:not_found (matchers/pred #(not (nil? %)))}}]
+          :malt/exception-validators
+          {:not_found (matchers/pred #(not (nil? %)))}}
+         (meta #'find!)))))
 
 (deftest multi-arity-checked-protocol-metadata-test
   (let [proto-data (into {} MultiArityCheckedExceptions)]
@@ -155,7 +163,16 @@
              {:throws [conflict]
               :exception-validators
               {:conflict (matchers/pred #(not (nil? %)))}}]}}}
-         proto-data))))
+         proto-data))
+
+    (is (match?
+         {:malt/specs
+          [{:exception-validators
+            {:not_found (matchers/pred #(not (nil? %)))}}
+           {:exception-validators
+            {:conflict (matchers/pred #(not (nil? %)))}}]
+          :malt/exception-validators matchers/absent}
+         (meta #'fail!)))))
 
 (deftest multi-arity-checked-exceptions-test
   (let [api (->MultiArityApi)]

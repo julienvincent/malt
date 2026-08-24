@@ -49,9 +49,8 @@
             ...}}}
    ```
 
-   The resolved schema data (excluding the precompiled validators) is also
-   attached to the metadata of each generated method var, so a method's
-   signature can be read from the method itself:
+   The resolved schema data is also attached to the metadata of each generated
+   method var, so a method's signature can be read from the method itself:
 
    ```clojure
    (meta #'foo)
@@ -60,7 +59,9 @@
     [{:params [name]
       :param-schemas {:name :string}
       :arguments-schema [:cat :string]
-      :return-schema :string}]
+      :return-schema :string
+      :arguments-validator #object[...]
+      :return-validator #object[...]}]
     ...}
    ```
 

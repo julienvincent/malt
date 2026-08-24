@@ -55,6 +55,14 @@
                                 :doc nil}}}
          proto-data))
 
+    (is (match?
+         {:malt/specs
+          [{:arguments-validator (matchers/pred #(not (nil? %)))
+            :return-validator (matchers/pred #(not (nil? %)))}]
+          :malt/arguments-validator (matchers/pred #(not (nil? %)))
+          :malt/return-validator (matchers/pred #(not (nil? %)))}
+         (meta #'with-docstrings)))
+
     (is (= 1 (with-nothing (reify Example0
                              (with-nothing [_] 1)))))))
 
@@ -228,7 +236,17 @@
                         :tag nil
                         :a/b 1})}}
 
-         proto-data))))
+         proto-data))
+
+    (is (match?
+         {:malt/specs
+          [{:arguments-validator (matchers/pred #(not (nil? %)))
+            :return-validator (matchers/pred #(not (nil? %)))}
+           {:arguments-validator (matchers/pred #(not (nil? %)))
+            :return-validator (matchers/pred #(not (nil? %)))}]
+          :malt/arguments-validator matchers/absent
+          :malt/return-validator matchers/absent}
+         (meta #'foo)))))
 
 (deftest multi-arity-with-zero-metadata-test
   (let [proto-data (into {} MultiArityWithZeroExample)]

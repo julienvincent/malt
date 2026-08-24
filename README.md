@@ -210,8 +210,8 @@ UserStore
      :exception-validators {:not_found #object[...]}}]}}}
 ```
 
-The resolved schema data is also attached to the metadata of each generated method var, so a method's specs can be read
-directly without going through the protocol. Precompiled validators are omitted from method var metadata:
+The complete resolved specs are also attached to the metadata of each generated method var, so a method's specs and
+precompiled validators can be read directly without going through the protocol:
 
 ```clojure
 (meta #'create-user)
@@ -220,7 +220,9 @@ directly without going through the protocol. Precompiled validators are omitted 
    :param-schemas {:name :string
                    :age :int}
    :arguments-schema [:cat :string :int]
-   :return-schema :string}]
+   :return-schema :string
+   :arguments-validator #object[...]
+   :return-validator #object[...]}]
 
  ...}
 ```
