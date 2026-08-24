@@ -28,6 +28,10 @@ features for protocols and records such as `find-references`, `find-definitions`
 work the way you would expect. Your editor will understand the syntax out-of-the-box with no need for finiky
 configurations or tweaks.
 
+Lastly the entire resulting interface specification is exposed **publicly as data** for you to use or for tooling to
+consume. This allows generating clients/code, generating schemas such as OpenAPI, generating derivative interfaces such
+as protobuf interfaces, or building general derivative tooling all from a single protocol interface definition.
+
 ## Quick example
 
 <!-- pruner-ignore -->
@@ -135,6 +139,11 @@ clearer.
 Additionally, the `this` parameter from `clojure.core/defprotocol` is completely omitted as we consider it unnecessary
 due to being required by every method.
 
+Exports:
+
+- The protocol var (`UserStore`).
+- A `?`-prefixed Malli schema that checks `satisfies?` for the protocol (`?UserStore`).
+
 #### Multiple arities
 
 For a method with multiple arities, wrap each input, return, and optional `throws` contract in a list. Each arity can
@@ -151,11 +160,6 @@ use different input schemas, return schemas, and checked exceptions:
      [:maybe ?User]
      (throws [not-found lookup-failed]))))
 ```
-
-Exports:
-
-- `UserStore`: the protocol var.
-- `?UserStore`: Malli schema that checks `satisfies?` for the protocol.
 
 #### Static Protocol Data
 
